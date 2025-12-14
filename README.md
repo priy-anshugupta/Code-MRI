@@ -1,2 +1,1 @@
-# Geo-GreenScore
-Geo-GreenScore is a unified environmental intelligence platform that visualizes air, water, greenery, pollen and solar sustainability data on an interactive map, using AI to analyze community-reported incidents.
+The CODE MRI aims to solve the Onboarding Bottleneck in open-source development, where new contributors are overwhelmed by complexity and expose themselves to risks by running unknown code. The solution is a web-based platform that securely scans, visualizes, and explains the project structure and quality without executing any code, acting as an automated mentor for developers.
