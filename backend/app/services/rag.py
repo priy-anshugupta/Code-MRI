@@ -149,14 +149,28 @@ def index_repository(repo_path: str, repo_id: str):
         return {"indexed": True, "vector": False, "warning": str(e)}
 
 def get_chat_chain(repo_id: str) -> Runnable:
-    """
-    Returns a RAG chain for a specific repository.
+    """Return a RAG chain for a specific repository.
+
+    This will lazily index the repository if no vector or fallback
+    index is found, so the caller doesn't need to pre-call /index.
     """
     if not settings.GOOGLE_API_KEY:
-         raise ValueError("GOOGLE_API_KEY is not set.")
+        raise ValueError("GOOGLE_API_KEY is not set.")
 
     index_path = os.path.join(FAISS_ROOT, repo_id)
     fallback_chunks = _load_fallback_chunks(repo_id)
+
+    # If nothing has been indexed yet, try to index on-demand.
+    if not os.path.exists(index_path) and not fallback_chunks:
+        repo_path = os.path.join(settings.TEMP_DIR, repo_id)
+        if not os.path.exists(repo_path):
+            raise ValueError(
+                f"Repository {repo_id} not found on disk. Re-run analysis for this repo."
+            )
+        # Indexing will always write fallback chunks, and may also
+        # create a FAISS index if embeddings are available.
+        index_repository(repo_path, repo_id)
+        fallback_chunks = _load_fallback_chunks(repo_id)
 
     retriever = None
     if os.path.exists(index_path):
@@ -194,7 +208,7 @@ If you don't know the answer, say \"I couldn't find that in the codebase.\"\n\nC
         return chain
     else:
         raise ValueError(
-            f"Index for repo {repo_id} not found. Run /index/{repo_id} first (or ensure indexing succeeds)."
+            f"Index for repo {repo_id} not found and could not be created."
         )
     
     llm = ChatGoogleGenerativeAI(

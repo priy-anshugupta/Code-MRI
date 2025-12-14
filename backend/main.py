@@ -148,7 +148,7 @@ def get_report(repo_id: str):
         technologies = detect_technologies(repo_path)
         metrics = calculate_aggregate_metrics(repo_path)
         issues = run_static_analysis(repo_path)
-        summary = generate_summary(repo_path, technologies)
+        summary = generate_summary(repo_path, technologies, metrics, issues)
         
         return {
             "repo_id": repo_id,

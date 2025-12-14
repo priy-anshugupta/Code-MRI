@@ -1,8 +1,15 @@
 import os
 import re
-from typing import List, Dict, Any, Tuple, Set
+import json
+from typing import List, Dict, Any, Tuple, Set, Optional
+
 import radon.raw
 import radon.complexity
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+from app.core.config import settings
 
 IGNORE_DIRS = {'.git', 'node_modules', '__pycache__', '.idea', '.vscode', 'venv', 'env', 'dist', 'build', 'coverage'}
 IGNORE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg', '.mp4', '.mov', '.mp3', '.wav', '.pdf', '.zip', '.tar', '.gz', '.pyc'}
@@ -400,8 +407,19 @@ def calculate_aggregate_metrics(repo_path: str) -> Dict[str, Any]:
     }
 
 
-def generate_summary(repo_path: str, technologies: List[str]) -> str:
-    """Generate a brief summary description of the repository."""
+def generate_summary(
+    repo_path: str,
+    technologies: List[str],
+    metrics: Optional[Dict[str, Any]] = None,
+    issues: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    """Generate a brief natural-language summary of the repository.
+
+    If a GOOGLE_API_KEY is configured, this uses Gemini to produce a
+    richer AI-generated description. Otherwise it falls back to a
+    deterministic summary based on technology detection and basic
+    file statistics.
+    """
     # Count files by type
     py_files = 0
     js_files = 0
@@ -417,8 +435,9 @@ def generate_summary(repo_path: str, technologies: List[str]) -> str:
             elif f.endswith('.ts') or f.endswith('.tsx'):
                 ts_files += 1
     
+    # Basic deterministic summary text used as a fallback or prompt seed.
     parts = []
-    
+
     # Determine project type
     if "FastAPI" in technologies or "Flask" in technologies or "Django" in technologies:
         parts.append("Python web API")
@@ -432,7 +451,7 @@ def generate_summary(repo_path: str, technologies: List[str]) -> str:
         parts.append("JavaScript/TypeScript project")
     else:
         parts.append("Software project")
-    
+
     # Add backend framework
     if "FastAPI" in technologies:
         parts.append("with FastAPI backend")
@@ -442,24 +461,73 @@ def generate_summary(repo_path: str, technologies: List[str]) -> str:
         parts.append("with Django backend")
     elif "Express" in technologies:
         parts.append("with Express.js backend")
-    
+
     # Add frontend
     if "Next.js" in technologies:
         parts.append("and Next.js frontend")
     elif "React" in technologies:
         parts.append("and React frontend")
-    
+
     # Add database
     if "PostgreSQL" in technologies:
         parts.append("using PostgreSQL")
     elif "MongoDB" in technologies:
         parts.append("using MongoDB")
-    
+
     # Add ORM
     if "SQLAlchemy" in technologies:
         parts.append("with SQLAlchemy ORM")
     elif "Prisma" in technologies:
         parts.append("with Prisma ORM")
-    
-    summary = " ".join(parts) + "."
-    return summary
+
+    base_summary = " ".join(parts) + "."
+
+    # If no LLM configured, return the deterministic summary.
+    if not settings.GOOGLE_API_KEY:
+        return base_summary
+
+    # Prepare additional context for the model.
+    metrics_payload: Dict[str, Any] = metrics or {}
+    issues_payload = (issues or [])[:10]
+
+    context = {
+        "technologies": technologies,
+        "file_stats": {
+            "python_files": py_files,
+            "javascript_files": js_files,
+            "typescript_files": ts_files,
+        },
+        "metrics": metrics_payload,
+        "issues": issues_payload,
+        "baseline": base_summary,
+    }
+
+    template = """You are an expert software architect.
+Given structured analysis data about a code repository, write a concise
+3-5 sentence execution summary that would help a new engineer quickly
+understand what this project does and how it is built.
+
+- Start with what the project is and its main purpose.
+- Mention the primary technologies and notable architectural choices.
+- Briefly comment on overall code quality using the metrics.
+- Optionally highlight any significant risks or smells if present.
+- Do not speculate beyond what the data suggests.
+
+Here is the structured analysis JSON:
+{analysis_json}
+"""
+
+    try:
+        prompt = ChatPromptTemplate.from_template(template)
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            temperature=0.2,
+            google_api_key=settings.GOOGLE_API_KEY,
+        )
+        chain = prompt | llm | StrOutputParser()
+        summary = chain.invoke({"analysis_json": json.dumps(context, ensure_ascii=False)})
+        return summary.strip() or base_summary
+    except Exception:
+        # Any failure should fall back to the deterministic summary to
+        # keep the endpoint stable.
+        return base_summary
