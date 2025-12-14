@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+python-multipart
+requests
+radon
+langchain
+langchain-community
+langchain-google-genai
+faiss-cpu
+tiktoken
+
+
