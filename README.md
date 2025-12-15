@@ -22,7 +22,7 @@ The modern open-source ecosystem faces a critical **Onboarding Bottleneck**:
 
 The system follows a **three-tier microservices architecture** designed for security and scalability.
 
-![System Architecture](attachment:be9e480a-86af-42e5-99fc-8ee001e2554f:image.png)
+![System Architecture](statics/architecture.png)
 
 ### A. The Frontend (The Dashboard)
 
@@ -57,7 +57,7 @@ The system follows a **three-tier microservices architecture** designed for secu
 
 ### 4. End-to-End Workflow
 
-![End-to-End Workflow](attachment:52615367-e882-4897-8d2c-5319c95d296b:image.png)
+![End-to-End Workflow](statics/workflow.png)
 
 ### Phase 1: Ingestion (The Scan)
 
@@ -91,7 +91,7 @@ The frontend renders the results:
 
 Since the system handles external code, security is paramount.
 
-![Security Threat Model](attachment:a1d26364-5372-4edf-9e97-4b436ec71d62:image.png)
+![Security Threat Model](statics/security.png)
 
 ### Threat Category: System Integrity
 
