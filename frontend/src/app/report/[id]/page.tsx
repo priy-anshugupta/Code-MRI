@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { FileTree } from '@/components/FileTree'
+import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { GitBranch, ShieldCheck, Cpu, AlertTriangle, Terminal, FileCode, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
@@ -140,7 +141,7 @@ const AIAssistant = ({ repoId }: { repoId: string }) => {
                         )}
                         {m.role === 'bot' && (
                             <div className="bg-white/5 p-3 rounded">
-                                {m.text}
+                                <MarkdownRenderer content={m.text} />
                             </div>
                         )}
                     </div>
@@ -275,7 +276,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                             <div className="flex flex-col lg:flex-row gap-6">
                                 <div className="flex-1">
                                     <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Execution Summary</h2>
-                                    <p className="text-foreground leading-relaxed">{data.summary}</p>
+                                    <div className="text-foreground leading-relaxed">
+                                        <MarkdownRenderer content={data.summary} />
+                                    </div>
                                 </div>
                                 <div className="flex flex-col items-center justify-center lg:border-l lg:border-white/10 lg:pl-8">
                                     <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Quality Grade</div>
@@ -381,7 +384,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                                             {fileAnalysis.summary && (
                                                 <div>
                                                     <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Summary</div>
-                                                    <p className="text-sm leading-relaxed">{fileAnalysis.summary}</p>
+                                                    <div className="text-sm leading-relaxed">
+                                                        <MarkdownRenderer content={fileAnalysis.summary} />
+                                                    </div>
                                                 </div>
                                             )}
 
@@ -408,7 +413,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                                             {fileAnalysis.patterns && (
                                                 <div>
                                                     <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Patterns & Libraries</div>
-                                                    <p className="text-sm text-muted-foreground">{fileAnalysis.patterns}</p>
+                                                    <div className="text-sm text-muted-foreground">
+                                                        <MarkdownRenderer content={fileAnalysis.patterns} />
+                                                    </div>
                                                 </div>
                                             )}
 
@@ -416,7 +423,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                                             {fileAnalysis.quality_notes && (
                                                 <div>
                                                     <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Quality Notes</div>
-                                                    <p className="text-sm text-muted-foreground">{fileAnalysis.quality_notes}</p>
+                                                    <div className="text-sm text-muted-foreground">
+                                                        <MarkdownRenderer content={fileAnalysis.quality_notes} />
+                                                    </div>
                                                 </div>
                                             )}
                                         </>
