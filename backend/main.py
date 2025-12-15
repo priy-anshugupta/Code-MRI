@@ -197,6 +197,37 @@ def chat_endpoint(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class FileAnalyzeRequest(BaseModel):
+    repo_id: str
+    file_path: str
+
+
+@app.post("/analyze-file")
+def analyze_file_endpoint(request: FileAnalyzeRequest):
+    """
+    Analyze a specific file and return AI-generated explanation of what it does.
+    """
+    from app.services.analyzer import analyze_file_with_ai
+
+    repo_path = os.path.join(settings.TEMP_DIR, request.repo_id)
+    if not os.path.exists(repo_path):
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    _touch_repo(request.repo_id)
+
+    # Construct full file path
+    full_path = os.path.join(repo_path, request.file_path)
+    if not os.path.exists(full_path) or not os.path.isfile(full_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        result = analyze_file_with_ai(full_path, request.file_path)
+        return result
+    except Exception as e:
+        print(f"File Analysis Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/repo/{repo_id}")
 def delete_repo(repo_id: str):
     """

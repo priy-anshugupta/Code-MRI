@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { FileTree } from '@/components/FileTree'
-import { GitBranch, ShieldCheck, Cpu, AlertTriangle, Terminal } from 'lucide-react'
+import { GitBranch, ShieldCheck, Cpu, AlertTriangle, Terminal, FileCode, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 
@@ -46,6 +46,18 @@ interface ReportData {
     metrics: Metrics
     issues: Issue[]
     summary: string
+}
+
+interface FileAnalysis {
+    file: string
+    metrics?: FileMetrics
+    summary?: string
+    purpose?: string
+    key_elements?: Array<{ name: string; description: string } | string>
+    patterns?: string
+    quality_notes?: string
+    error?: string
+    truncated?: boolean
 }
 
 // Grade color helper
@@ -155,6 +167,8 @@ export default function ReportPage({ params }: { params: { id: string } }) {
     const [error, setError] = useState('')
     const [loading, setLoading] = useState(true)
     const [selectedFile, setSelectedFile] = useState<string | null>(null)
+    const [fileAnalysis, setFileAnalysis] = useState<FileAnalysis | null>(null)
+    const [fileAnalyzing, setFileAnalyzing] = useState(false)
 
     const fetchData = useCallback(async () => {
         try {
@@ -167,6 +181,36 @@ export default function ReportPage({ params }: { params: { id: string } }) {
             setLoading(false)
         }
     }, [params.id])
+
+    const handleFileSelect = useCallback(async (filePath: string) => {
+        // Remove the root folder name from the path (first segment)
+        const pathParts = filePath.split('/')
+        const cleanPath = pathParts.length > 1 ? pathParts.slice(1).join('/') : filePath
+        
+        setSelectedFile(filePath)
+        setFileAnalysis(null)
+        setFileAnalyzing(true)
+
+        try {
+            const res = await api.post('/analyze-file', {
+                repo_id: params.id,
+                file_path: cleanPath
+            })
+            setFileAnalysis(res.data)
+        } catch (err: any) {
+            setFileAnalysis({
+                file: cleanPath,
+                error: err.response?.data?.detail || 'Failed to analyze file'
+            })
+        } finally {
+            setFileAnalyzing(false)
+        }
+    }, [params.id])
+
+    const clearFileSelection = () => {
+        setSelectedFile(null)
+        setFileAnalysis(null)
+    }
 
     useEffect(() => {
         fetchData()
@@ -213,8 +257,13 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                 <aside className="w-72 border-r border-white/10 bg-black/20 overflow-y-auto hidden lg:block">
                     <div className="p-4 border-b border-white/10">
                         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Project Structure</h2>
+                        <p className="text-xs text-muted-foreground/60 mt-1">Click a file to analyze</p>
                     </div>
-                    <FileTree data={data.tree} />
+                    <FileTree 
+                        data={data.tree} 
+                        onFileSelect={handleFileSelect}
+                        selectedFile={selectedFile}
+                    />
                 </aside>
 
                 {/* Main Content */}
@@ -270,16 +319,110 @@ export default function ReportPage({ params }: { params: { id: string } }) {
 
                         {/* Context Inspector */}
                         <div className="glass-card rounded-xl p-6">
-                            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
-                                <Terminal className="h-4 w-4" /> Context Inspector
-                            </h2>
-                            <div className="text-center py-8 text-muted-foreground">
-                                {selectedFile ? (
-                                    <div>Inspecting: {selectedFile}</div>
-                                ) : (
-                                    <div className="font-mono text-sm">AWAITING_SELECTION...</div>
+                            <div className="flex items-center justify-between mb-4">
+                                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                                    <Terminal className="h-4 w-4" /> Context Inspector
+                                </h2>
+                                {selectedFile && (
+                                    <Button variant="ghost" size="sm" onClick={clearFileSelection} className="h-6 w-6 p-0">
+                                        <X className="h-4 w-4" />
+                                    </Button>
                                 )}
                             </div>
+                            
+                            {!selectedFile && (
+                                <div className="text-center py-8 text-muted-foreground">
+                                    <FileCode className="h-8 w-8 mx-auto mb-3 opacity-50" />
+                                    <div className="font-mono text-sm">AWAITING_SELECTION...</div>
+                                    <p className="text-xs mt-2 opacity-60">Select a file from the tree to analyze</p>
+                                </div>
+                            )}
+
+                            {selectedFile && fileAnalyzing && (
+                                <div className="text-center py-8">
+                                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-primary" />
+                                    <div className="font-mono text-sm text-muted-foreground">Analyzing {selectedFile.split('/').pop()}...</div>
+                                </div>
+                            )}
+
+                            {selectedFile && !fileAnalyzing && fileAnalysis && (
+                                <div className="space-y-4">
+                                    {/* File Header */}
+                                    <div className="flex items-center gap-2 p-3 bg-white/5 rounded-lg">
+                                        <FileCode className="h-5 w-5 text-primary" />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="font-medium text-sm truncate">{fileAnalysis.file}</div>
+                                            {fileAnalysis.metrics && (
+                                                <div className="text-xs text-muted-foreground">
+                                                    {fileAnalysis.metrics.loc} LOC • {fileAnalysis.metrics.comments} comments • CC: {typeof fileAnalysis.metrics.complexity === 'number' ? fileAnalysis.metrics.complexity.toFixed(1) : fileAnalysis.metrics.complexity}
+                                                </div>
+                                            )}
+                                        </div>
+                                        {fileAnalysis.truncated && (
+                                            <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded">Truncated</span>
+                                        )}
+                                    </div>
+
+                                    {fileAnalysis.error ? (
+                                        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+                                            {fileAnalysis.error}
+                                        </div>
+                                    ) : (
+                                        <>
+                                            {/* Purpose */}
+                                            {fileAnalysis.purpose && (
+                                                <div>
+                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Purpose</div>
+                                                    <div className="text-sm font-medium text-primary">{fileAnalysis.purpose}</div>
+                                                </div>
+                                            )}
+
+                                            {/* Summary */}
+                                            {fileAnalysis.summary && (
+                                                <div>
+                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Summary</div>
+                                                    <p className="text-sm leading-relaxed">{fileAnalysis.summary}</p>
+                                                </div>
+                                            )}
+
+                                            {/* Key Elements */}
+                                            {fileAnalysis.key_elements && fileAnalysis.key_elements.length > 0 && (
+                                                <div>
+                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Key Elements</div>
+                                                    <div className="space-y-2">
+                                                        {fileAnalysis.key_elements.map((el, i) => (
+                                                            <div key={i} className="text-sm p-2 bg-white/5 rounded">
+                                                                {typeof el === 'string' ? el : (
+                                                                    <>
+                                                                        <span className="font-mono text-primary">{el.name}</span>
+                                                                        {el.description && <span className="text-muted-foreground"> - {el.description}</span>}
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Patterns */}
+                                            {fileAnalysis.patterns && (
+                                                <div>
+                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Patterns & Libraries</div>
+                                                    <p className="text-sm text-muted-foreground">{fileAnalysis.patterns}</p>
+                                                </div>
+                                            )}
+
+                                            {/* Quality Notes */}
+                                            {fileAnalysis.quality_notes && (
+                                                <div>
+                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Quality Notes</div>
+                                                    <p className="text-sm text-muted-foreground">{fileAnalysis.quality_notes}</p>
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+                            )}
                         </div>
 
                         {/* Static Analysis Results */}
@@ -329,7 +472,11 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                         <div className="lg:hidden">
                             <h3 className="font-semibold mb-4 text-sm uppercase tracking-wider text-muted-foreground">File Structure</h3>
                             <div className="border border-white/10 rounded-lg overflow-hidden bg-black/20">
-                                <FileTree data={data.tree} />
+                                <FileTree 
+                                    data={data.tree} 
+                                    onFileSelect={handleFileSelect}
+                                    selectedFile={selectedFile}
+                                />
                             </div>
                         </div>
                     </div>

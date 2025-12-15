@@ -531,3 +531,104 @@ Here is the structured analysis JSON:
         # Any failure should fall back to the deterministic summary to
         # keep the endpoint stable.
         return base_summary
+
+
+def analyze_file_with_ai(file_path: str, relative_path: str) -> Dict[str, Any]:
+    """
+    Analyze a single file using AI and return what it does, its purpose,
+    key functions/classes, and any notable patterns.
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+    except Exception as e:
+        return {
+            "file": relative_path,
+            "error": f"Could not read file: {str(e)}",
+        }
+
+    # Truncate very large files to avoid token limits
+    max_chars = 15000
+    truncated = len(content) > max_chars
+    if truncated:
+        content = content[:max_chars] + "\n\n... [truncated for analysis]"
+
+    # Calculate basic metrics
+    metrics = calculate_metrics(file_path)
+
+    # If no API key, return basic info only
+    if not settings.GOOGLE_API_KEY:
+        return {
+            "file": relative_path,
+            "metrics": metrics,
+            "summary": "AI analysis unavailable (no API key configured).",
+            "purpose": "Unknown",
+            "key_elements": [],
+        }
+
+    template = """You are an expert code reviewer analyzing a source file.
+Given the file content below, provide a concise analysis in JSON format with these fields:
+- "summary": A 2-3 sentence description of what this file does
+- "purpose": The main purpose/role of this file in one short phrase (e.g., "API endpoint definitions", "Database models", "Utility functions")
+- "key_elements": An array of up to 5 key functions, classes, or components defined in this file with brief descriptions
+- "patterns": Notable design patterns, libraries, or architectural choices used
+- "quality_notes": Brief notes on code quality (readability, complexity, potential issues)
+
+File: {file_path}
+Metrics: LOC={loc}, Comments={comments}, Complexity={complexity}
+
+```
+{content}
+```
+
+Respond ONLY with valid JSON, no markdown formatting or explanation."""
+
+    try:
+        prompt = ChatPromptTemplate.from_template(template)
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            temperature=0.1,
+            google_api_key=settings.GOOGLE_API_KEY,
+        )
+        chain = prompt | llm | StrOutputParser()
+        result = chain.invoke({
+            "file_path": relative_path,
+            "loc": metrics.get("loc", 0),
+            "comments": metrics.get("comments", 0),
+            "complexity": metrics.get("complexity", 0),
+            "content": content,
+        })
+
+        # Parse JSON response
+        # Clean up potential markdown code blocks
+        result = result.strip()
+        if result.startswith("```"):
+            result = result.split("\n", 1)[1] if "\n" in result else result[3:]
+        if result.endswith("```"):
+            result = result[:-3]
+        result = result.strip()
+
+        parsed = json.loads(result)
+        return {
+            "file": relative_path,
+            "metrics": metrics,
+            "truncated": truncated,
+            **parsed,
+        }
+    except json.JSONDecodeError:
+        return {
+            "file": relative_path,
+            "metrics": metrics,
+            "summary": result if 'result' in dir() else "Analysis failed",
+            "purpose": "Unknown",
+            "key_elements": [],
+            "error": "Failed to parse AI response as JSON",
+        }
+    except Exception as e:
+        return {
+            "file": relative_path,
+            "metrics": metrics,
+            "summary": f"Analysis error: {str(e)}",
+            "purpose": "Unknown",
+            "key_elements": [],
+        }
