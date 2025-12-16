@@ -8,6 +8,19 @@ interface MarkdownRendererProps {
 }
 
 export function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
+    // Ensure content is always a string and handle edge cases
+    const safeContent = React.useMemo(() => {
+        if (typeof content !== 'string') {
+            console.warn('MarkdownRenderer received non-string content:', content);
+            return String(content || '');
+        }
+        return content;
+    }, [content]);
+
+    if (!safeContent) {
+        return null;
+    }
+
     return (
         <div className={`markdown-content ${className}`}>
             <ReactMarkdown
@@ -50,7 +63,7 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
                     hr: ({node, ...props}) => <hr className="my-4 border-white/10" {...props} />,
                 }}
             >
-                {content}
+                {safeContent}
             </ReactMarkdown>
         </div>
     );

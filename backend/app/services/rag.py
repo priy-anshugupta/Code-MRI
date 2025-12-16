@@ -11,6 +11,7 @@ from langchain_core.runnables import RunnablePassthrough, Runnable
 from langchain_core.output_parsers import StrOutputParser
 
 from app.core.config import settings
+from app.core.rate_limiter import gemini_limiter
 from app.core.security import redact_secrets
 
 # High value files to index

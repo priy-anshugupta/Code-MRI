@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { FileTree } from '@/components/FileTree'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
-import { GitBranch, ShieldCheck, Cpu, AlertTriangle, Terminal, FileCode, Loader2, X } from 'lucide-react'
+import { CodeViewModal } from '@/components/CodeViewModal'
+import { GitBranch, ShieldCheck, Cpu, AlertTriangle, Terminal, FileCode, Loader2, X, Eye } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 
@@ -40,6 +41,19 @@ interface Metrics {
     total_loc: number
 }
 
+interface ScoringData {
+    category_scores: {
+        readability: number
+        complexity: number
+        docs_coverage: number
+        security: number
+    }
+    final_score: number
+    ai_analysis: string
+    file_count: number
+    total_loc: number
+}
+
 interface ReportData {
     repo_id: string
     tree: FileNode
@@ -47,6 +61,7 @@ interface ReportData {
     metrics: Metrics
     issues: Issue[]
     summary: string
+    scoring?: ScoringData
 }
 
 interface FileAnalysis {
@@ -141,7 +156,7 @@ const AIAssistant = ({ repoId }: { repoId: string }) => {
                         )}
                         {m.role === 'bot' && (
                             <div className="bg-white/5 p-3 rounded">
-                                <MarkdownRenderer content={m.text} />
+                                <MarkdownRenderer content={String(m.text || '')} />
                             </div>
                         )}
                     </div>
@@ -170,6 +185,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
     const [selectedFile, setSelectedFile] = useState<string | null>(null)
     const [fileAnalysis, setFileAnalysis] = useState<FileAnalysis | null>(null)
     const [fileAnalyzing, setFileAnalyzing] = useState(false)
+    const [isCodeModalOpen, setIsCodeModalOpen] = useState(false)
 
     const fetchData = useCallback(async () => {
         try {
@@ -229,8 +245,8 @@ export default function ReportPage({ params }: { params: { id: string } }) {
         )
     }
 
-    if (error) return <div className="min-h-screen flex items-center justify-center text-red-400 bg-background">{error}</div>
-    if (!data) return null
+    if (error) return <div className="min-h-screen flex items-center justify-center text-red-400 bg-background">{error}</div>;
+    if (!data) return null;
 
     return (
         <div className="min-h-screen bg-background">
@@ -277,7 +293,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                                 <div className="flex-1">
                                     <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Execution Summary</h2>
                                     <div className="text-foreground leading-relaxed">
-                                        <MarkdownRenderer content={data.summary} />
+                                        <MarkdownRenderer content={String(data.summary || '')} />
                                     </div>
                                 </div>
                                 <div className="flex flex-col items-center justify-center lg:border-l lg:border-white/10 lg:pl-8">
@@ -320,6 +336,50 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                             </div>
                         </div>
 
+                        {/* AI Scoring Agent Analysis */}
+                        {data.scoring && (
+                            <div className="glass-card rounded-xl p-6 border border-primary/20">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
+                                    <h2 className="text-sm font-semibold text-primary uppercase tracking-wider">AI Scoring Agent Analysis</h2>
+                                </div>
+                                <div className="space-y-4">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex-1">
+                                            <div className="text-sm text-muted-foreground mb-2">Overall Code Quality Score</div>
+                                            <div className="flex items-baseline gap-2">
+                                                <span className="text-4xl font-bold text-primary">{data.scoring.final_score}</span>
+                                                <span className="text-lg text-muted-foreground">/100</span>
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3 text-xs">
+                                            <div className="text-center p-2 rounded bg-white/5">
+                                                <div className="text-muted-foreground">Readability</div>
+                                                <div className="text-green-400 font-bold">{data.scoring.category_scores.readability}</div>
+                                            </div>
+                                            <div className="text-center p-2 rounded bg-white/5">
+                                                <div className="text-muted-foreground">Complexity</div>
+                                                <div className="text-yellow-400 font-bold">{data.scoring.category_scores.complexity}</div>
+                                            </div>
+                                            <div className="text-center p-2 rounded bg-white/5">
+                                                <div className="text-muted-foreground">Docs</div>
+                                                <div className="text-purple-400 font-bold">{data.scoring.category_scores.docs_coverage}</div>
+                                            </div>
+                                            <div className="text-center p-2 rounded bg-white/5">
+                                                <div className="text-muted-foreground">Security</div>
+                                                <div className="text-red-400 font-bold">{data.scoring.category_scores.security}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="border-t border-white/10 pt-4">
+                                        <div className="text-sm leading-relaxed text-foreground/90">
+                                            <MarkdownRenderer content={String(data.scoring.ai_analysis || '')} />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Context Inspector */}
                         <div className="glass-card rounded-xl p-6">
                             <div className="flex items-center justify-between mb-4">
@@ -361,6 +421,15 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                                                 </div>
                                             )}
                                         </div>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setIsCodeModalOpen(true)}
+                                            className="gap-2"
+                                        >
+                                            <Eye className="h-4 w-4" />
+                                            View Code
+                                        </Button>
                                         {fileAnalysis.truncated && (
                                             <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded">Truncated</span>
                                         )}
@@ -385,7 +454,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                                                 <div>
                                                     <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Summary</div>
                                                     <div className="text-sm leading-relaxed">
-                                                        <MarkdownRenderer content={fileAnalysis.summary} />
+                                                        <MarkdownRenderer content={String(fileAnalysis.summary || '')} />
                                                     </div>
                                                 </div>
                                             )}
@@ -414,7 +483,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                                                 <div>
                                                     <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Patterns & Libraries</div>
                                                     <div className="text-sm text-muted-foreground">
-                                                        <MarkdownRenderer content={fileAnalysis.patterns} />
+                                                        <MarkdownRenderer content={String(fileAnalysis.patterns || '')} />
                                                     </div>
                                                 </div>
                                             )}
@@ -424,7 +493,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                                                 <div>
                                                     <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Quality Notes</div>
                                                     <div className="text-sm text-muted-foreground">
-                                                        <MarkdownRenderer content={fileAnalysis.quality_notes} />
+                                                        <MarkdownRenderer content={String(fileAnalysis.quality_notes || '')} />
                                                     </div>
                                                 </div>
                                             )}
@@ -496,6 +565,17 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                     <AIAssistant repoId={params.id} />
                 </aside>
             </div>
+            
+            {/* Code View Modal */}
+            {fileAnalysis && (
+                <CodeViewModal
+                    isOpen={isCodeModalOpen}
+                    onClose={() => setIsCodeModalOpen(false)}
+                    repoId={params.id}
+                    filePath={selectedFile || ''}
+                    fileAnalysis={fileAnalysis}
+                />
+            )}
         </div>
     )
 }

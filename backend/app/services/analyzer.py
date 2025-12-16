@@ -10,6 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from app.core.config import settings
+from app.core.rate_limiter import gemini_limiter
 
 IGNORE_DIRS = {'.git', 'node_modules', '__pycache__', '.idea', '.vscode', 'venv', 'env', 'dist', 'build', 'coverage'}
 IGNORE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg', '.mp4', '.mov', '.mp3', '.wav', '.pdf', '.zip', '.tar', '.gz', '.pyc'}
@@ -525,6 +526,11 @@ Here is the structured analysis JSON:
             google_api_key=settings.GOOGLE_API_KEY,
         )
         chain = prompt | llm | StrOutputParser()
+        
+        # Wait for rate limit
+        if not gemini_limiter.acquire(timeout=120):
+            return base_summary  # Fall back if rate limited
+        
         summary = chain.invoke({"analysis_json": json.dumps(context, ensure_ascii=False)})
         return summary.strip() or base_summary
     except Exception:
@@ -591,6 +597,15 @@ Respond ONLY with valid JSON, no markdown formatting or explanation."""
             google_api_key=settings.GOOGLE_API_KEY,
         )
         chain = prompt | llm | StrOutputParser()
+        
+        # Wait for rate limit
+        if not gemini_limiter.acquire(timeout=120):
+            return {
+                "file": relative_path,
+                "metrics": metrics,
+                "error": "Rate limit exceeded. Please wait a moment and try again.",
+            }
+        
         result = chain.invoke({
             "file_path": relative_path,
             "loc": metrics.get("loc", 0),

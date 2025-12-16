@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from typing import Dict, Any, Optional
 
 from app.core.config import settings
+from app.core.rate_limiter import gemini_limiter
 from app.services.cloner import clone_repository
 from app.services.analyzer import (
     analyze_directory_structure,
@@ -18,6 +19,7 @@ from app.services.analyzer import (
     generate_summary,
 )
 from app.services.rag import index_repository, get_chat_chain
+from app.services.scorer import compute_repo_score, compute_file_score, generate_ai_score_analysis
 
 # ---------------------------------------------------------------------------
 # Auto-cleanup: track repo last-access time and delete after TTL (1 hour)
@@ -136,6 +138,7 @@ def analyze_repo(request: AnalyzeRequest):
 def get_report(repo_id: str):
     """
     Retrieve existing analysis for a repo (or re-analyze if simple).
+    Now includes AI-powered scoring analysis.
     """
     repo_path = os.path.join(settings.TEMP_DIR, repo_id)
     if not os.path.exists(repo_path):
@@ -150,6 +153,14 @@ def get_report(repo_id: str):
         issues = run_static_analysis(repo_path)
         summary = generate_summary(repo_path, technologies, metrics, issues)
         
+        # Compute AI-powered scores using the Scoring Agent
+        score_data = compute_repo_score(repo_path)
+        ai_score_analysis = generate_ai_score_analysis(
+            score_data, 
+            technologies=technologies,
+            repo_name=repo_id
+        )
+        
         return {
             "repo_id": repo_id,
             "tree": file_tree,
@@ -157,8 +168,170 @@ def get_report(repo_id: str):
             "metrics": metrics,
             "issues": issues,
             "summary": summary,
+            "score": score_data,
+            "ai_analysis": ai_score_analysis,
         }
     except Exception as e:
+        print(f"Report Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/score/{repo_id}")
+def get_score(repo_id: str):
+    """Compute and return the repository score and breakdown."""
+    repo_path = os.path.join(settings.TEMP_DIR, repo_id)
+    if not os.path.exists(repo_path):
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    _touch_repo(repo_id)
+
+    try:
+        result = compute_repo_score(repo_path)
+        return result
+    except Exception as e:
+        print(f"Scoring Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class FileScoreRequest(BaseModel):
+    repo_id: str
+    file_path: str
+
+
+@app.post("/score-file")
+def score_file_endpoint(request: FileScoreRequest):
+    repo_path = os.path.join(settings.TEMP_DIR, request.repo_id)
+    if not os.path.exists(repo_path):
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    _touch_repo(request.repo_id)
+
+    full_path = os.path.join(repo_path, request.file_path)
+    if not os.path.exists(full_path) or not os.path.isfile(full_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        result = compute_file_score(full_path)
+        return result
+    except Exception as e:
+        print(f"File Scoring Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class FileContentRequest(BaseModel):
+    repo_id: str
+    file_path: str
+
+
+@app.post("/file-content")
+def get_file_content(request: FileContentRequest):
+    """Get the raw content of a file for display."""
+    repo_path = os.path.join(settings.TEMP_DIR, request.repo_id)
+    if not os.path.exists(repo_path):
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    _touch_repo(request.repo_id)
+
+    full_path = os.path.join(repo_path, request.file_path)
+    if not os.path.exists(full_path) or not os.path.isfile(full_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        
+        # Detect language from extension
+        ext = os.path.splitext(request.file_path)[1].lower()
+        language_map = {
+            '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
+            '.tsx': 'typescript', '.jsx': 'javascript', '.java': 'java',
+            '.cpp': 'cpp', '.c': 'c', '.go': 'go', '.rs': 'rust',
+            '.html': 'html', '.css': 'css', '.json': 'json',
+            '.md': 'markdown', '.yml': 'yaml', '.yaml': 'yaml',
+        }
+        language = language_map.get(ext, 'text')
+        
+        return {
+            "file_path": request.file_path,
+            "content": content,
+            "language": language,
+            "lines": len(content.splitlines()),
+        }
+    except Exception as e:
+        print(f"File Content Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class FileChatRequest(BaseModel):
+    repo_id: str
+    file_path: str
+    message: str
+
+
+@app.post("/chat-file")
+def chat_file_endpoint(request: FileChatRequest):
+    """Chat about a specific file using AI."""
+    repo_path = os.path.join(settings.TEMP_DIR, request.repo_id)
+    if not os.path.exists(repo_path):
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    _touch_repo(request.repo_id)
+
+    full_path = os.path.join(repo_path, request.file_path)
+    if not os.path.exists(full_path) or not os.path.isfile(full_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        from langchain_core.prompts import ChatPromptTemplate
+        from langchain_core.output_parsers import StrOutputParser
+        
+        if not settings.GOOGLE_API_KEY:
+            raise ValueError("GOOGLE_API_KEY is not set.")
+        
+        # Read file content
+        with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        
+        # Truncate if too large
+        max_chars = 20000
+        if len(content) > max_chars:
+            content = content[:max_chars] + "\n\n... [truncated for context]"
+        
+        template = """You are an expert code assistant helping a developer understand a specific file.
+
+File: {file_path}
+
+File Content:
+```
+{content}
+```
+
+User Question: {question}
+
+Provide a clear, concise answer based on the file content. If the question is not related to this file, politely redirect the user."""
+        
+        prompt = ChatPromptTemplate.from_template(template)
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            temperature=0.2,
+            google_api_key=settings.GOOGLE_API_KEY,
+        )
+        chain = prompt | llm | StrOutputParser()
+        
+        # Wait for rate limit
+        if not gemini_limiter.acquire(timeout=120):
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait a moment and try again.")
+        
+        response = chain.invoke({
+            "file_path": request.file_path,
+            "content": content,
+            "question": request.message,
+        })
+        
+        return {"response": response}
+    except Exception as e:
+        print(f"File Chat Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -189,9 +362,15 @@ def chat_endpoint(request: ChatRequest):
     _touch_repo(request.repo_id)
 
     try:
+        # Wait for rate limit before making AI call
+        if not gemini_limiter.acquire(timeout=120):
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait a moment and try again.")
+        
         chain = get_chat_chain(request.repo_id)
         response = chain.invoke(request.message)
         return {"response": response}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Chat Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
