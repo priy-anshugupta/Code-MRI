@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { FileTree } from '@/components/FileTree'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { CodeViewModal } from '@/components/CodeViewModal'
@@ -186,6 +186,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
     const [fileAnalysis, setFileAnalysis] = useState<FileAnalysis | null>(null)
     const [fileAnalyzing, setFileAnalyzing] = useState(false)
     const [isCodeModalOpen, setIsCodeModalOpen] = useState(false)
+    const [fileTreeWidth, setFileTreeWidth] = useState(288)
+    const [assistantWidth, setAssistantWidth] = useState(320)
+    const resizeRef = useRef({ dragging: null as null | 'left' | 'right', startX: 0, startLeftWidth: 288, startRightWidth: 320 })
 
     const fetchData = useCallback(async () => {
         try {
@@ -233,6 +236,59 @@ export default function ReportPage({ params }: { params: { id: string } }) {
         fetchData()
     }, [fetchData])
 
+    const startResizeRight = useCallback((e: React.MouseEvent) => {
+        // Only left mouse button
+        if ('button' in e && e.button !== 0) return
+        resizeRef.current = { dragging: 'right', startX: e.clientX, startLeftWidth: fileTreeWidth, startRightWidth: assistantWidth }
+        document.body.style.cursor = 'col-resize'
+        document.body.style.userSelect = 'none'
+        e.preventDefault()
+    }, [assistantWidth, fileTreeWidth])
+
+    const startResizeLeft = useCallback((e: React.MouseEvent) => {
+        // Only left mouse button
+        if ('button' in e && e.button !== 0) return
+        resizeRef.current = { dragging: 'left', startX: e.clientX, startLeftWidth: fileTreeWidth, startRightWidth: assistantWidth }
+        document.body.style.cursor = 'col-resize'
+        document.body.style.userSelect = 'none'
+        e.preventDefault()
+    }, [assistantWidth, fileTreeWidth])
+
+    useEffect(() => {
+        const onMouseMove = (e: MouseEvent) => {
+            const state = resizeRef.current
+            if (!state.dragging) return
+
+            if (state.dragging === 'right') {
+                const delta = state.startX - e.clientX
+                const nextWidth = Math.min(640, Math.max(260, state.startRightWidth + delta))
+                setAssistantWidth(nextWidth)
+                return
+            }
+
+            if (state.dragging === 'left') {
+                const delta = e.clientX - state.startX
+                const nextWidth = Math.min(520, Math.max(240, state.startLeftWidth + delta))
+                setFileTreeWidth(nextWidth)
+            }
+        }
+
+        const stopDragging = () => {
+            if (!resizeRef.current.dragging) return
+            resizeRef.current.dragging = null
+            document.body.style.cursor = ''
+            document.body.style.userSelect = ''
+        }
+
+        window.addEventListener('mousemove', onMouseMove)
+        window.addEventListener('mouseup', stopDragging)
+        return () => {
+            window.removeEventListener('mousemove', onMouseMove)
+            window.removeEventListener('mouseup', stopDragging)
+            stopDragging()
+        }
+    }, [])
+
     if (loading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-background">
@@ -271,7 +327,10 @@ export default function ReportPage({ params }: { params: { id: string } }) {
 
             <div className="flex h-[calc(100vh-3.5rem)]">
                 {/* Left Sidebar - File Tree */}
-                <aside className="w-72 border-r border-white/10 bg-black/20 overflow-y-auto hidden lg:block">
+                <aside
+                    className="border-r border-white/10 bg-black/20 overflow-y-auto hidden lg:block"
+                    style={{ width: fileTreeWidth }}
+                >
                     <div className="p-4 border-b border-white/10">
                         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Project Structure</h2>
                         <p className="text-xs text-muted-foreground/60 mt-1">Click a file to analyze</p>
@@ -283,8 +342,19 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                     />
                 </aside>
 
+                {/* VS Code-style vertical splitter (File Tree) */}
+                <div
+                    className="hidden lg:flex w-2 h-full cursor-col-resize group"
+                    onMouseDown={startResizeLeft}
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize project structure panel"
+                >
+                    <div className="mx-auto h-full w-px bg-white/10 group-hover:bg-white/20" />
+                </div>
+
                 {/* Main Content */}
-                <main className="flex-1 overflow-y-auto">
+                <main className="flex-1 overflow-y-auto no-scrollbar">
                     <div className="p-6 lg:p-8 max-w-5xl mx-auto space-y-6">
                         
                         {/* Execution Summary + Grade */}
@@ -560,8 +630,21 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                     </div>
                 </main>
 
-                {/* Right Sidebar - AI Assistant */}
-                <aside className="w-80 border-l border-white/10 bg-black/20 hidden xl:flex flex-col">
+                {/* VS Code-style vertical splitter + Right Sidebar (Resizable) */}
+                <div
+                    className="hidden xl:flex w-2 h-full cursor-col-resize group"
+                    onMouseDown={startResizeRight}
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize AI assistant panel"
+                >
+                    <div className="mx-auto h-full w-px bg-white/10 group-hover:bg-white/20" />
+                </div>
+
+                <aside
+                    className="hidden xl:flex flex-col bg-black/20"
+                    style={{ width: assistantWidth }}
+                >
                     <AIAssistant repoId={params.id} />
                 </aside>
             </div>

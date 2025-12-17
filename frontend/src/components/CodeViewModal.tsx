@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { X, MessageSquare, FileCode, Loader2, Send } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
@@ -33,15 +33,7 @@ export function CodeViewModal({ isOpen, onClose, repoId, filePath, fileAnalysis 
     const [chatInput, setChatInput] = useState('')
     const [chatLoading, setChatLoading] = useState(false)
 
-    useEffect(() => {
-        if (isOpen && filePath) {
-            fetchFileContent()
-            setMode('summary')
-            setChatMessages([])
-        }
-    }, [isOpen, filePath, repoId])
-
-    const fetchFileContent = async () => {
+    const fetchFileContent = useCallback(async () => {
         setLoading(true)
         try {
             const cleanPath = filePath.split('/').slice(1).join('/')
@@ -57,7 +49,15 @@ export function CodeViewModal({ isOpen, onClose, repoId, filePath, fileAnalysis 
         } finally {
             setLoading(false)
         }
-    }
+    }, [filePath, repoId])
+
+    useEffect(() => {
+        if (isOpen && filePath) {
+            fetchFileContent()
+            setMode('summary')
+            setChatMessages([])
+        }
+    }, [isOpen, filePath, fetchFileContent])
 
     const handleChatSend = async (e: React.FormEvent) => {
         e.preventDefault()

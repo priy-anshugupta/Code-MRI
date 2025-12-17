@@ -10,5 +10,6 @@ langchain-community
 langchain-google-genai
 faiss-cpu
 tiktoken
+google-genai>=1.0.0
 
 
