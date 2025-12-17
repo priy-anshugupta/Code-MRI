@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
-import { motion } from 'framer-motion'
-import { ArrowRight, Loader2, Search } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { ArrowRight, Loader2, Search, Github, Terminal, ShieldCheck, Zap, Code2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
@@ -12,7 +12,12 @@ export default function Home() {
     const [url, setUrl] = useState('')
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
+    const [mounted, setMounted] = useState(false)
     const router = useRouter()
+
+    useEffect(() => {
+        setMounted(true)
+    }, [])
 
     const handleAnalyze = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -35,83 +40,141 @@ export default function Home() {
         }
     }
 
+    if (!mounted) return null
+
     return (
-        <main className="flex min-h-screen flex-col items-center justify-center p-6 relative overflow-hidden bg-background">
-            {/* Background Ambience */}
-            <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
-                <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-primary/20 rounded-full blur-[120px] mix-blend-screen animate-pulse" />
-                <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-purple-500/10 rounded-full blur-[100px] mix-blend-screen" />
+        <main className="flex min-h-screen flex-col items-center justify-center p-6 relative overflow-hidden bg-background selection:bg-primary/30">
+            {/* Dynamic Background */}
+            <div className="absolute inset-0 z-0">
+                <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-background to-background" />
+                <div className="absolute bottom-0 left-0 right-0 h-[500px] bg-gradient-to-t from-background to-transparent" />
+                
+                {/* Animated Grid */}
+                <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
+                
+                {/* Floating Orbs */}
+                <motion.div 
+                    animate={{ 
+                        x: [0, 100, 0],
+                        y: [0, -50, 0],
+                        opacity: [0.3, 0.5, 0.3]
+                    }}
+                    transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
+                    className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/20 rounded-full blur-[128px]" 
+                />
+                <motion.div 
+                    animate={{ 
+                        x: [0, -100, 0],
+                        y: [0, 50, 0],
+                        opacity: [0.2, 0.4, 0.2]
+                    }}
+                    transition={{ duration: 15, repeat: Infinity, ease: "easeInOut", delay: 2 }}
+                    className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-[128px]" 
+                />
             </div>
 
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.8 }}
-                className="z-10 w-full max-w-2xl text-center space-y-8"
-            >
-                <div className="space-y-4">
-                    <div className="inline-flex items-center px-3 py-1 rounded-full border border-white/10 bg-white/5 text-xs font-medium text-primary-foreground/80 mb-4">
-                        <span className="flex h-2 w-2 rounded-full bg-primary mr-2 animate-pulse"></span>
-                        System Online v1.0
+            <div className="z-10 w-full max-w-4xl mx-auto flex flex-col items-center text-center space-y-12">
+                
+                {/* Hero Section */}
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.8, ease: "easeOut" }}
+                    className="space-y-6"
+                >
+                    <div className="inline-flex items-center px-4 py-1.5 rounded-full border border-primary/20 bg-primary/5 text-sm font-medium text-primary backdrop-blur-sm">
+                        <span className="relative flex h-2 w-2 mr-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                        </span>
+                        System Online v2.0
                     </div>
-                    <h1 className="text-5xl md:text-7xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-b from-white to-white/60">
+                    
+                    <h1 className="text-6xl md:text-8xl font-bold tracking-tighter bg-clip-text text-transparent bg-gradient-to-b from-white via-white/90 to-white/50 pb-2">
                         Code MRI
                     </h1>
-                    <p className="text-xl text-muted-foreground max-w-lg mx-auto leading-relaxed">
+                    
+                    <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto leading-relaxed font-light">
                         Autonomous static analysis & intelligence engine.
                         <br />
-                        Scan. Diagnose. Interact.
+                        <span className="text-foreground/80">Scan. Diagnose. Optimize.</span>
                     </p>
-                </div>
+                </motion.div>
 
-                <form onSubmit={handleAnalyze} className="w-full max-w-md mx-auto space-y-4 pt-8 relative">
-                    <div className="relative group">
-                        <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-muted-foreground group-focus-within:text-primary transition-colors">
-                            <Search className="h-5 w-5" />
+                {/* Search Interface */}
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.6, delay: 0.2 }}
+                    className="w-full max-w-xl relative group"
+                >
+                    <div className="absolute -inset-1 bg-gradient-to-r from-primary/50 via-blue-500/50 to-primary/50 rounded-2xl blur opacity-20 group-hover:opacity-40 transition duration-500" />
+                    
+                    <form onSubmit={handleAnalyze} className="relative bg-black/40 backdrop-blur-xl border border-white/10 rounded-2xl p-2 flex items-center shadow-2xl">
+                        <div className="pl-4 text-muted-foreground">
+                            <Github className="h-6 w-6" />
                         </div>
                         <Input
                             placeholder="https://github.com/username/repo"
-                            className="pl-10 h-14 bg-white/5 border-white/10 text-lg transition-all focus:ring-primary/50 focus:border-primary/50"
+                            className="flex-1 h-14 bg-transparent border-none text-lg focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/50 font-mono"
                             value={url}
                             onChange={(e) => setUrl(e.target.value)}
                             disabled={loading}
                         />
-                    </div>
-
-                    <Button
-                        type="submit"
-                        className="w-full h-12 text-md font-medium"
-                        size="lg"
-                        variant="default" // Primary color
-                        disabled={loading}
-                    >
-                        {loading ? (
-                            <>
-                                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                                Scanning Repository...
-                            </>
-                        ) : (
-                            <>
-                                Initialize Scan <ArrowRight className="ml-2 h-4 w-4" />
-                            </>
-                        )}
-                    </Button>
-
-                    {error && (
-                        <motion.p
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            className="text-red-400 text-sm mt-3"
+                        <Button
+                            type="submit"
+                            className="h-12 px-8 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-medium transition-all duration-300 hover:shadow-[0_0_20px_rgba(var(--primary),0.5)]"
+                            disabled={loading}
                         >
-                            {error}
-                        </motion.p>
-                    )}
-                </form>
-            </motion.div>
+                            {loading ? (
+                                <Loader2 className="h-5 w-5 animate-spin" />
+                            ) : (
+                                <ArrowRight className="h-5 w-5" />
+                            )}
+                        </Button>
+                    </form>
 
-            <footer className="absolute bottom-6 text-xs text-muted-foreground/50">
-                Engineered for precision. Secure Execution Environment.
-            </footer>
+                    <AnimatePresence>
+                        {error && (
+                            <motion.div
+                                initial={{ opacity: 0, y: -10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                className="absolute top-full left-0 right-0 mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm text-center backdrop-blur-md"
+                            >
+                                {error}
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </motion.div>
+
+                {/* Features Grid */}
+                <motion.div
+                    initial={{ opacity: 0, y: 40 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.8, delay: 0.4 }}
+                    className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl pt-12"
+                >
+                    {[
+                        { icon: ShieldCheck, title: "Security Audit", desc: "Deep scan for vulnerabilities and security risks." },
+                        { icon: Zap, title: "Performance Metrics", desc: "Analyze complexity, maintainability, and efficiency." },
+                        { icon: Code2, title: "Code Quality", desc: "Automated code review and best practice enforcement." }
+                    ].map((feature, idx) => (
+                        <div key={idx} className="group p-6 rounded-2xl bg-white/5 border border-white/5 hover:border-primary/20 hover:bg-white/10 transition-all duration-300 backdrop-blur-sm">
+                            <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                                <feature.icon className="h-6 w-6 text-primary" />
+                            </div>
+                            <h3 className="text-lg font-semibold mb-2 text-foreground/90">{feature.title}</h3>
+                            <p className="text-sm text-muted-foreground">{feature.desc}</p>
+                        </div>
+                    ))}
+                </motion.div>
+            </div>
+            
+            {/* Footer */}
+            <div className="absolute bottom-6 text-xs text-muted-foreground/40 font-mono">
+                ENGINE: GEMINI-PRO-3 // STATUS: OPERATIONAL
+            </div>
         </main>
     )
 }

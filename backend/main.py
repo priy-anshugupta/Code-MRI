@@ -2,6 +2,7 @@ import os
 import shutil
 import threading
 import time
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +19,7 @@ from app.services.analyzer import (
     calculate_aggregate_metrics,
     generate_summary,
 )
-from app.services.rag import index_repository, get_chat_chain
+from app.services.rag import index_repository, get_chat_chain, delete_repo_indexes, delete_all_indexes
 from app.services.scorer import compute_repo_score, compute_file_score, generate_ai_score_analysis
 
 # ---------------------------------------------------------------------------
@@ -44,6 +45,8 @@ def _cleanup_expired_repos() -> None:
         repo_path = os.path.join(settings.TEMP_DIR, rid)
         if os.path.exists(repo_path):
             shutil.rmtree(repo_path, ignore_errors=True)
+        # Also remove any persisted indexes for this repo
+        delete_repo_indexes(rid)
         with _cleanup_lock:
             repo_access_times.pop(rid, None)
 
@@ -59,19 +62,37 @@ _cleanup_thread: Optional[threading.Thread] = None
 
 
 def _cleanup_all_repos() -> None:
-    """Delete all cloned repos in temp_clones folder."""
+    """Delete all cloned repos in any temp_clones folder."""
+    # 1) Clean temp_clones relative to current working directory (backend/temp_clones when run from backend)
     if os.path.exists(settings.TEMP_DIR):
         for entry in os.listdir(settings.TEMP_DIR):
             entry_path = os.path.join(settings.TEMP_DIR, entry)
             if os.path.isdir(entry_path):
                 shutil.rmtree(entry_path, ignore_errors=True)
+
+    # 2) Also clean a temp_clones directory at the project root, if it exists
+    try:
+        project_root = Path(__file__).resolve().parent.parent
+        root_temp = project_root / settings.TEMP_DIR
+        if root_temp.exists():
+            for entry in os.listdir(root_temp):
+                entry_path = root_temp / entry
+                if entry_path.is_dir():
+                    shutil.rmtree(entry_path, ignore_errors=True)
+    except Exception as e:
+        # Best-effort cleanup; log and continue
+        print(f"Error cleaning root temp_clones: {e}")
     with _cleanup_lock:
         repo_access_times.clear()
+    # Also wipe all FAISS and fallback indexes
+    delete_all_indexes()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _cleanup_thread
+    # On startup, purge any leftover temp clones and indexes from previous runs
+    _cleanup_all_repos()
     _cleanup_thread = threading.Thread(target=_cleanup_loop, args=(_cleanup_stop,), daemon=True)
     _cleanup_thread.start()
     yield
@@ -410,11 +431,20 @@ def analyze_file_endpoint(request: FileAnalyzeRequest):
 @app.delete("/repo/{repo_id}")
 def delete_repo(repo_id: str):
     """
-    Manually delete a cloned repo immediately.
+    Manually delete a cloned repo and all its indexes immediately.
     """
     repo_path = os.path.join(settings.TEMP_DIR, repo_id)
     if os.path.exists(repo_path):
         shutil.rmtree(repo_path, ignore_errors=True)
+    # Remove any FAISS and fallback indexes tied to this repo
+    delete_repo_indexes(repo_id)
     with _cleanup_lock:
         repo_access_times.pop(repo_id, None)
     return {"message": "Deleted"}
+
+
+@app.post("/cleanup")
+def cleanup_all():
+    """Force-delete all temp_clones, FAISS indexes, and fallback indexes."""
+    _cleanup_all_repos()
+    return {"message": "All repos and indexes removed"}

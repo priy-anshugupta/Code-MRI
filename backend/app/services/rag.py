@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import List
 from langchain_community.document_loaders import TextLoader
@@ -31,6 +32,32 @@ FALLBACK_ROOT = str(PROJECT_ROOT / "fallback_indexes")
 
 def _repo_fallback_path(repo_id: str) -> str:
     return os.path.join(FALLBACK_ROOT, repo_id, "chunks.jsonl")
+
+
+def delete_repo_indexes(repo_id: str) -> None:
+    """Delete FAISS and fallback indexes for a single repo."""
+    faiss_path = os.path.join(FAISS_ROOT, repo_id)
+    if os.path.exists(faiss_path):
+        shutil.rmtree(faiss_path, ignore_errors=True)
+
+    fallback_dir = os.path.join(FALLBACK_ROOT, repo_id)
+    if os.path.exists(fallback_dir):
+        shutil.rmtree(fallback_dir, ignore_errors=True)
+
+
+def delete_all_indexes() -> None:
+    """Delete all per-repo FAISS and fallback index folders."""
+    if os.path.exists(FAISS_ROOT):
+        for entry in os.listdir(FAISS_ROOT):
+            entry_path = os.path.join(FAISS_ROOT, entry)
+            if os.path.isdir(entry_path):
+                shutil.rmtree(entry_path, ignore_errors=True)
+
+    if os.path.exists(FALLBACK_ROOT):
+        for entry in os.listdir(FALLBACK_ROOT):
+            entry_path = os.path.join(FALLBACK_ROOT, entry)
+            if os.path.isdir(entry_path):
+                shutil.rmtree(entry_path, ignore_errors=True)
 
 
 def _write_fallback_chunks(repo_id: str, splits) -> None:

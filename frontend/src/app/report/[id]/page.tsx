@@ -1,14 +1,92 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { FileTree } from '@/components/FileTree'
-import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { CodeViewModal } from '@/components/CodeViewModal'
-import { GitBranch, ShieldCheck, Cpu, AlertTriangle, Terminal, FileCode, Loader2, X, Eye } from 'lucide-react'
+import { GitBranch, ShieldCheck, Cpu, AlertTriangle, Terminal, FileCode, Loader2, X, Eye, Activity, Layers, Box, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
+import { motion } from 'framer-motion'
+import { cn } from '@/lib/utils'
+import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 
-// Types
+// Right Sidebar Component - AI Assistant Only
+const AIAssistant = ({ repoId }: { repoId: string }) => {
+    const [messages, setMessages] = useState<{ role: 'system' | 'user' | 'bot', text: string }[]>([
+        { role: 'system', text: 'System ready. Repository analysis complete. Waiting for query...' }
+    ])
+    const [input, setInput] = useState('')
+    const [loading, setLoading] = useState(false)
+
+    const handleSend = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!input.trim()) return
+
+        const userMsg = input
+        setMessages(p => [...p, { role: 'user', text: userMsg }])
+        setInput('')
+        setLoading(true)
+
+        try {
+            const res = await api.post('/chat', {
+                repo_id: repoId,
+                message: userMsg
+            })
+            setMessages(p => [...p, { role: 'bot', text: res.data.response }])
+        } catch (err) {
+            setMessages(p => [...p, { role: 'bot', text: 'Error: Could not retrieve answer.' }])
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    return (
+        <div className="h-full flex flex-col">
+            <div className="p-4 border-b border-white/10 bg-white/5">
+                <h3 className="font-semibold text-sm flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                    AI ASSISTANT
+                </h3>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                {messages.map((m, i) => (
+                    <div key={i} className={`text-sm ${m.role === 'system' ? 'font-mono text-xs' : ''}`}>
+                        {m.role === 'system' && (
+                            <div className="text-green-400/80 bg-green-500/5 p-3 rounded border border-green-500/20">
+                                <span className="text-green-500 mr-2">@ SYSTEM</span>
+                                {m.text}
+                            </div>
+                        )}
+                        {m.role === 'user' && (
+                            <div className="bg-primary/20 text-primary-foreground p-3 rounded ml-4">
+                                {m.text}
+                            </div>
+                        )}
+                        {m.role === 'bot' && (
+                            <div className="bg-white/5 p-3 rounded border border-white/5">
+                                <MarkdownRenderer content={String(m.text || '')} />
+                            </div>
+                        )}
+                    </div>
+                ))}
+                {loading && <div className="text-xs text-muted-foreground animate-pulse font-mono">Processing query...</div>}
+            </div>
+            <form onSubmit={handleSend} className="p-4 border-t border-white/10 bg-white/5">
+                <div className="flex gap-2 items-center">
+                    <span className="text-primary">{'>'}</span>
+                    <input
+                        className="flex-1 bg-transparent border-none text-sm focus:outline-none placeholder:text-muted-foreground"
+                        placeholder="Execute query..."
+                        value={input}
+                        onChange={e => setInput(e.target.value)}
+                    />
+                </div>
+            </form>
+        </div>
+    )
+}
+
+// Types (kept same as before)
 interface FileMetrics {
     loc?: number
     comments?: number
@@ -76,168 +154,119 @@ interface FileAnalysis {
     truncated?: boolean
 }
 
-// Grade color helper
-const getGradeColor = (grade: string) => {
-    if (grade.startsWith('A')) return 'text-green-400'
-    if (grade.startsWith('B')) return 'text-blue-400'
-    if (grade.startsWith('C')) return 'text-yellow-400'
-    if (grade.startsWith('D')) return 'text-orange-400'
-    return 'text-red-400'
-}
-
-const getSeverityColor = (severity: string) => {
-    switch (severity) {
-        case 'HIGH': return 'bg-red-500/20 text-red-400 border-red-500/30'
-        case 'MEDIUM': return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-        case 'LOW': return 'bg-blue-500/20 text-blue-400 border-blue-500/30'
-        default: return 'bg-gray-500/20 text-gray-400'
-    }
-}
-
-// Metric Card Component
-const MetricCard = ({ label, value, color }: { label: string, value: number, color: string }) => (
-    <div className="text-center">
-        <div className="text-xs text-muted-foreground font-mono uppercase tracking-wider mb-2">{label}</div>
-        <div className={`text-3xl font-bold ${color}`}>{value}</div>
+// Components
+const StatCard = ({ label, value, icon: Icon, trend }: { label: string, value: string | number, icon: any, trend?: string }) => (
+    <div className="glass-card p-6 rounded-xl relative overflow-hidden group hover:border-primary/30 transition-all duration-300">
+        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+            <Icon className="w-16 h-16" />
+        </div>
+        <div className="relative z-10">
+            <div className="flex items-center gap-2 text-muted-foreground mb-2">
+                <Icon className="w-4 h-4" />
+                <span className="text-xs font-medium uppercase tracking-wider">{label}</span>
+            </div>
+            <div className="text-3xl font-bold text-foreground tracking-tight">{value}</div>
+            {trend && <div className="text-xs text-green-400 mt-1">{trend}</div>}
+        </div>
     </div>
 )
 
-// AI Assistant Panel
-const AIAssistant = ({ repoId }: { repoId: string }) => {
-    const [messages, setMessages] = useState<{ role: 'system' | 'user' | 'bot', text: string }[]>([
-        { role: 'system', text: 'System ready. Repository analysis complete. Waiting for query...' }
-    ])
-    const [input, setInput] = useState('')
-    const [loading, setLoading] = useState(false)
-
-    const handleSend = async (e: React.FormEvent) => {
-        e.preventDefault()
-        if (!input.trim()) return
-
-        const userMsg = input
-        setMessages(p => [...p, { role: 'user', text: userMsg }])
-        setInput('')
-        setLoading(true)
-
-        try {
-            const res = await api.post('/chat', {
-                repo_id: repoId,
-                message: userMsg
-            })
-            setMessages(p => [...p, { role: 'bot', text: res.data.response }])
-        } catch (err) {
-            setMessages(p => [...p, { role: 'bot', text: 'Error: Could not retrieve answer.' }])
-        } finally {
-            setLoading(false)
-        }
-    }
-
+const GradeCircle = ({ grade }: { grade: string }) => {
+    const color = grade.startsWith('A') ? 'text-green-400 border-green-500/50 shadow-[0_0_30px_rgba(74,222,128,0.2)]' :
+                  grade.startsWith('B') ? 'text-blue-400 border-blue-500/50 shadow-[0_0_30px_rgba(96,165,250,0.2)]' :
+                  grade.startsWith('C') ? 'text-yellow-400 border-yellow-500/50 shadow-[0_0_30px_rgba(250,204,21,0.2)]' :
+                  'text-red-400 border-red-500/50 shadow-[0_0_30px_rgba(248,113,113,0.2)]'
+    
     return (
-        <div className="h-full flex flex-col">
-            <div className="p-4 border-b border-white/10">
-                <h3 className="font-semibold text-sm flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                    AI ASSISTANT
-                </h3>
+        <div className={cn("w-32 h-32 rounded-full border-4 flex items-center justify-center bg-background/50 backdrop-blur-sm", color)}>
+            <div className="text-center">
+                <div className="text-5xl font-bold">{grade}</div>
+                <div className="text-xs font-medium opacity-70 mt-1">OVERALL</div>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {messages.map((m, i) => (
-                    <div key={i} className={`text-sm ${m.role === 'system' ? 'font-mono text-xs' : ''}`}>
-                        {m.role === 'system' && (
-                            <div className="text-green-400/80 bg-green-500/5 p-3 rounded border border-green-500/20">
-                                <span className="text-green-500 mr-2">@ SYSTEM</span>
-                                {m.text}
-                            </div>
-                        )}
-                        {m.role === 'user' && (
-                            <div className="bg-primary/20 text-primary-foreground p-3 rounded ml-4">
-                                {m.text}
-                            </div>
-                        )}
-                        {m.role === 'bot' && (
-                            <div className="bg-white/5 p-3 rounded">
-                                <MarkdownRenderer content={String(m.text || '')} />
-                            </div>
-                        )}
-                    </div>
-                ))}
-                {loading && <div className="text-xs text-muted-foreground animate-pulse font-mono">Processing query...</div>}
-            </div>
-            <form onSubmit={handleSend} className="p-4 border-t border-white/10">
-                <div className="flex gap-2">
-                    <span className="text-primary">{'>'}</span>
-                    <input
-                        className="flex-1 bg-transparent border-none text-sm focus:outline-none placeholder:text-muted-foreground"
-                        placeholder="Execute query..."
-                        value={input}
-                        onChange={e => setInput(e.target.value)}
-                    />
-                </div>
-            </form>
         </div>
     )
 }
 
+const IssueCard = ({ issue }: { issue: Issue }) => (
+    <div className="group p-4 rounded-lg bg-white/5 border border-white/5 hover:border-primary/20 hover:bg-white/10 transition-all duration-200">
+        <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                    <span className={cn(
+                        "px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border",
+                        issue.severity === 'HIGH' ? "bg-red-500/10 text-red-400 border-red-500/20" :
+                        issue.severity === 'MEDIUM' ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" :
+                        "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                    )}>
+                        {issue.severity}
+                    </span>
+                    <span className="text-xs text-muted-foreground font-mono">{issue.type}</span>
+                </div>
+                <h4 className="text-sm font-medium text-foreground/90 mb-1">{issue.title}</h4>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
+                    <FileCode className="w-3 h-3" />
+                    {issue.file}:{issue.line}
+                </div>
+            </div>
+        </div>
+    </div>
+)
+
 export default function ReportPage({ params }: { params: { id: string } }) {
     const [data, setData] = useState<ReportData | null>(null)
-    const [error, setError] = useState('')
     const [loading, setLoading] = useState(true)
+    const [error, setError] = useState('')
     const [selectedFile, setSelectedFile] = useState<string | null>(null)
+    const [isModalOpen, setIsModalOpen] = useState(false)
     const [fileAnalysis, setFileAnalysis] = useState<FileAnalysis | null>(null)
-    const [fileAnalyzing, setFileAnalyzing] = useState(false)
-    const [isCodeModalOpen, setIsCodeModalOpen] = useState(false)
+    const [analyzingFile, setAnalyzingFile] = useState(false)
     const [fileTreeWidth, setFileTreeWidth] = useState(288)
-    const [assistantWidth, setAssistantWidth] = useState(320)
-    const resizeRef = useRef({ dragging: null as null | 'left' | 'right', startX: 0, startLeftWidth: 288, startRightWidth: 320 })
+    const [assistantWidth, setAssistantWidth] = useState(360)
+    const resizeRef = useRef({ dragging: null as null | 'left' | 'right', startX: 0, startLeftWidth: 288, startRightWidth: 360 })
 
-    const fetchData = useCallback(async () => {
-        try {
-            const res = await api.get(`/report/${params.id}`)
-            setData(res.data)
-            api.post(`/index/${params.id}`).catch(console.error)
-            setLoading(false)
-        } catch (err) {
-            setError('Failed to load report. It may have expired.')
-            setLoading(false)
+    useEffect(() => {
+        const fetchData = async () => {
+            try {
+                const res = await api.get(`/report/${params.id}`)
+                setData(res.data)
+            } catch (err) {
+                setError('Failed to load report data.')
+            } finally {
+                setLoading(false)
+            }
         }
+        fetchData()
     }, [params.id])
 
-    const handleFileSelect = useCallback(async (filePath: string) => {
-        // Remove the root folder name from the path (first segment)
-        const pathParts = filePath.split('/')
-        const cleanPath = pathParts.length > 1 ? pathParts.slice(1).join('/') : filePath
-        
+    const handleFileSelect = async (filePath: string) => {
         setSelectedFile(filePath)
         setFileAnalysis(null)
-        setFileAnalyzing(true)
+        setAnalyzingFile(true)
 
         try {
+            const cleanPath = filePath.split('/').slice(1).join('/')
             const res = await api.post('/analyze-file', {
                 repo_id: params.id,
                 file_path: cleanPath
             })
             setFileAnalysis(res.data)
         } catch (err: any) {
+            console.error(err)
             setFileAnalysis({
-                file: cleanPath,
-                error: err.response?.data?.detail || 'Failed to analyze file'
+                file: filePath,
+                error: 'Failed to analyze file.'
             })
         } finally {
-            setFileAnalyzing(false)
+            setAnalyzingFile(false)
         }
-    }, [params.id])
+    }
 
     const clearFileSelection = () => {
         setSelectedFile(null)
         setFileAnalysis(null)
     }
 
-    useEffect(() => {
-        fetchData()
-    }, [fetchData])
-
     const startResizeRight = useCallback((e: React.MouseEvent) => {
-        // Only left mouse button
         if ('button' in e && e.button !== 0) return
         resizeRef.current = { dragging: 'right', startX: e.clientX, startLeftWidth: fileTreeWidth, startRightWidth: assistantWidth }
         document.body.style.cursor = 'col-resize'
@@ -246,7 +275,6 @@ export default function ReportPage({ params }: { params: { id: string } }) {
     }, [assistantWidth, fileTreeWidth])
 
     const startResizeLeft = useCallback((e: React.MouseEvent) => {
-        // Only left mouse button
         if ('button' in e && e.button !== 0) return
         resizeRef.current = { dragging: 'left', startX: e.clientX, startLeftWidth: fileTreeWidth, startRightWidth: assistantWidth }
         document.body.style.cursor = 'col-resize'
@@ -291,49 +319,55 @@ export default function ReportPage({ params }: { params: { id: string } }) {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-background">
-                <div className="text-center">
-                    <Cpu className="h-12 w-12 text-primary animate-pulse mx-auto mb-4" />
-                    <div className="text-lg font-medium">Analyzing Repository...</div>
-                    <div className="text-sm text-muted-foreground mt-2">Running static analysis</div>
-                </div>
+            <div className="min-h-screen flex flex-col items-center justify-center bg-background">
+                <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+                <div className="text-muted-foreground animate-pulse">Analyzing Repository Architecture...</div>
             </div>
         )
     }
 
-    if (error) return <div className="min-h-screen flex items-center justify-center text-red-400 bg-background">{error}</div>;
-    if (!data) return null;
+    if (error || !data) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-background text-red-400">
+                <AlertTriangle className="mr-2" /> {error || 'No data found'}
+            </div>
+        )
+    }
 
     return (
-        <div className="min-h-screen bg-background">
-            {/* Header Bar */}
-            <header className="h-14 border-b border-white/10 bg-black/40 flex items-center px-6 justify-between">
-                <div className="flex items-center gap-4">
-                    <h1 className="text-xl font-bold text-primary">CODE<span className="text-white">MRI</span></h1>
-                    <div className="flex items-center gap-2 text-sm">
-                        <GitBranch className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-muted-foreground">{data.repo_id}</span>
-                        <span className="px-2 py-0.5 rounded text-xs bg-primary/20 text-primary border border-primary/30">MASTER</span>
+        <div className="min-h-screen bg-background text-foreground font-sans selection:bg-primary/30">
+            {/* Top Navigation Bar */}
+            <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-background/80 backdrop-blur-xl">
+                <div className="container flex h-16 items-center justify-between px-4">
+                    <div className="flex items-center gap-2 font-bold text-xl tracking-tight">
+                        <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center">
+                            <Activity className="h-5 w-5 text-primary" />
+                        </div>
+                        Code MRI <span className="text-muted-foreground font-normal text-sm ml-2">/ Report / {params.id.substring(0, 8)}</span>
                     </div>
-                </div>
-                <div className="flex items-center gap-2">
-                    {data.technologies.map(tech => (
-                        <span key={tech} className="px-2 py-1 text-xs rounded bg-white/5 text-muted-foreground border border-white/10">
-                            {tech}
-                        </span>
-                    ))}
+                    <div className="flex items-center gap-2">
+                        {data.technologies.map((tech) => (
+                            <span 
+                                key={tech} 
+                                className="px-3 py-1.5 text-xs rounded-lg bg-primary/10 text-primary border border-primary/20 font-medium uppercase tracking-wider"
+                            >
+                                {tech}
+                            </span>
+                        ))}
+                        <Button size="sm" onClick={() => window.location.href = '/'}>New Scan</Button>
+                    </div>
                 </div>
             </header>
 
-            <div className="flex h-[calc(100vh-3.5rem)]">
+            <div className="flex h-[calc(100vh-4rem)]">
                 {/* Left Sidebar - File Tree */}
                 <aside
-                    className="border-r border-white/10 bg-black/20 overflow-y-auto hidden lg:block"
+                    className="border-r border-white/10 bg-black/20 overflow-y-auto hidden lg:block custom-scrollbar"
                     style={{ width: fileTreeWidth }}
                 >
-                    <div className="p-4 border-b border-white/10">
+                    <div className="p-4 border-b border-white/10 bg-white/5">
                         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Project Structure</h2>
-                        <p className="text-xs text-muted-foreground/60 mt-1">Click a file to analyze</p>
+                        <p className="text-xs text-muted-foreground/60 mt-1">{data.metrics.total_files} files • {data.metrics.total_loc.toLocaleString()} LOC</p>
                     </div>
                     <FileTree 
                         data={data.tree} 
@@ -344,111 +378,51 @@ export default function ReportPage({ params }: { params: { id: string } }) {
 
                 {/* VS Code-style vertical splitter (File Tree) */}
                 <div
-                    className="hidden lg:flex w-2 h-full cursor-col-resize group"
+                    className="hidden lg:flex w-2 h-full cursor-col-resize group hover:bg-primary/10 transition-colors"
                     onMouseDown={startResizeLeft}
                     role="separator"
                     aria-orientation="vertical"
                     aria-label="Resize project structure panel"
                 >
-                    <div className="mx-auto h-full w-px bg-white/10 group-hover:bg-white/20" />
+                    <div className="mx-auto h-full w-px bg-white/10 group-hover:bg-primary/30" />
                 </div>
 
                 {/* Main Content */}
-                <main className="flex-1 overflow-y-auto no-scrollbar">
-                    <div className="p-6 lg:p-8 max-w-5xl mx-auto space-y-6">
+                <main className="flex-1 overflow-y-auto custom-scrollbar">
+                    <div className="p-6 lg:p-8 max-w-6xl mx-auto space-y-6">
                         
-                        {/* Execution Summary + Grade */}
+                        {/* Overview Section */}
+                        <section className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                            {/* Grade & Score */}
+                            <div className="lg:col-span-1 glass-card rounded-xl p-6 flex flex-col items-center justify-center text-center space-y-4">
+                                <GradeCircle grade={data.metrics.grade} />
+                                <div>
+                                    <div className="text-sm text-muted-foreground uppercase tracking-wider font-medium">Health Score</div>
+                                    <div className="text-2xl font-bold text-foreground">{data.scoring?.final_score.toFixed(0) || 0}/100</div>
+                                </div>
+                            </div>
+
+                            {/* Key Metrics */}
+                            <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <StatCard label="Total Files" value={data.metrics.total_files} icon={FileCode} />
+                                <StatCard label="Lines of Code" value={data.metrics.total_loc.toLocaleString()} icon={Terminal} />
+                                <StatCard label="Issues Found" value={data.issues.length} icon={AlertTriangle} trend={data.issues.length > 0 ? "Requires Attention" : "Clean"} />
+                                <StatCard label="Complexity" value={data.metrics.complexity.toFixed(1)} icon={Cpu} />
+                                <StatCard label="Maintainability" value={data.metrics.maintainability.toFixed(1)} icon={Layers} />
+                                <StatCard label="Documentation" value={`${data.metrics.docs_coverage.toFixed(0)}%`} icon={Box} />
+                            </div>
+                        </section>
+
+                        {/* AI Summary */}
                         <div className="glass-card rounded-xl p-6">
-                            <div className="flex flex-col lg:flex-row gap-6">
-                                <div className="flex-1">
-                                    <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Execution Summary</h2>
-                                    <div className="text-foreground leading-relaxed">
-                                        <MarkdownRenderer content={String(data.summary || '')} />
-                                    </div>
-                                </div>
-                                <div className="flex flex-col items-center justify-center lg:border-l lg:border-white/10 lg:pl-8">
-                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Quality Grade</div>
-                                    <div className="relative">
-                                        <svg className="w-24 h-24" viewBox="0 0 100 100">
-                                            <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="8" />
-                                            <circle 
-                                                cx="50" cy="50" r="45" 
-                                                fill="none" 
-                                                stroke="currentColor" 
-                                                strokeWidth="8"
-                                                strokeLinecap="round"
-                                                strokeDasharray={`${(data.metrics.readability + data.metrics.complexity + data.metrics.maintainability + data.metrics.docs_coverage) / 4 * 2.83} 283`}
-                                                transform="rotate(-90 50 50)"
-                                                className={getGradeColor(data.metrics.grade)}
-                                            />
-                                        </svg>
-                                        <div className={`absolute inset-0 flex items-center justify-center text-3xl font-bold ${getGradeColor(data.metrics.grade)}`}>
-                                            {data.metrics.grade}
-                                        </div>
-                                    </div>
-                                </div>
+                            <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                                <ShieldCheck className="w-5 h-5 text-primary" />
+                                AI Executive Summary
+                            </h3>
+                            <div className="text-muted-foreground leading-relaxed">
+                                <MarkdownRenderer content={String(data.summary)} />
                             </div>
                         </div>
-
-                        {/* Metrics Grid */}
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                            <div className="glass-card rounded-xl p-5">
-                                <MetricCard label="Readability" value={data.metrics.readability} color="text-green-400" />
-                            </div>
-                            <div className="glass-card rounded-xl p-5">
-                                <MetricCard label="Complexity" value={data.metrics.complexity} color="text-yellow-400" />
-                            </div>
-                            <div className="glass-card rounded-xl p-5">
-                                <MetricCard label="Maintainability" value={data.metrics.maintainability} color="text-blue-400" />
-                            </div>
-                            <div className="glass-card rounded-xl p-5">
-                                <MetricCard label="Docs Coverage" value={data.metrics.docs_coverage} color="text-purple-400" />
-                            </div>
-                        </div>
-
-                        {/* AI Scoring Agent Analysis */}
-                        {data.scoring && (
-                            <div className="glass-card rounded-xl p-6 border border-primary/20">
-                                <div className="flex items-center gap-2 mb-4">
-                                    <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
-                                    <h2 className="text-sm font-semibold text-primary uppercase tracking-wider">AI Scoring Agent Analysis</h2>
-                                </div>
-                                <div className="space-y-4">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex-1">
-                                            <div className="text-sm text-muted-foreground mb-2">Overall Code Quality Score</div>
-                                            <div className="flex items-baseline gap-2">
-                                                <span className="text-4xl font-bold text-primary">{data.scoring.final_score}</span>
-                                                <span className="text-lg text-muted-foreground">/100</span>
-                                            </div>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-3 text-xs">
-                                            <div className="text-center p-2 rounded bg-white/5">
-                                                <div className="text-muted-foreground">Readability</div>
-                                                <div className="text-green-400 font-bold">{data.scoring.category_scores.readability}</div>
-                                            </div>
-                                            <div className="text-center p-2 rounded bg-white/5">
-                                                <div className="text-muted-foreground">Complexity</div>
-                                                <div className="text-yellow-400 font-bold">{data.scoring.category_scores.complexity}</div>
-                                            </div>
-                                            <div className="text-center p-2 rounded bg-white/5">
-                                                <div className="text-muted-foreground">Docs</div>
-                                                <div className="text-purple-400 font-bold">{data.scoring.category_scores.docs_coverage}</div>
-                                            </div>
-                                            <div className="text-center p-2 rounded bg-white/5">
-                                                <div className="text-muted-foreground">Security</div>
-                                                <div className="text-red-400 font-bold">{data.scoring.category_scores.security}</div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="border-t border-white/10 pt-4">
-                                        <div className="text-sm leading-relaxed text-foreground/90">
-                                            <MarkdownRenderer content={String(data.scoring.ai_analysis || '')} />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
 
                         {/* Context Inspector */}
                         <div className="glass-card rounded-xl p-6">
@@ -464,29 +438,29 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                             </div>
                             
                             {!selectedFile && (
-                                <div className="text-center py-8 text-muted-foreground">
-                                    <FileCode className="h-8 w-8 mx-auto mb-3 opacity-50" />
+                                <div className="text-center py-12 text-muted-foreground">
+                                    <FileCode className="h-12 w-12 mx-auto mb-3 opacity-30" />
                                     <div className="font-mono text-sm">AWAITING_SELECTION...</div>
                                     <p className="text-xs mt-2 opacity-60">Select a file from the tree to analyze</p>
                                 </div>
                             )}
 
-                            {selectedFile && fileAnalyzing && (
-                                <div className="text-center py-8">
-                                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-primary" />
+                            {selectedFile && analyzingFile && (
+                                <div className="text-center py-12">
+                                    <Loader2 className="h-12 w-12 mx-auto mb-3 animate-spin text-primary" />
                                     <div className="font-mono text-sm text-muted-foreground">Analyzing {selectedFile.split('/').pop()}...</div>
                                 </div>
                             )}
 
-                            {selectedFile && !fileAnalyzing && fileAnalysis && (
+                            {selectedFile && !analyzingFile && fileAnalysis && (
                                 <div className="space-y-4">
                                     {/* File Header */}
-                                    <div className="flex items-center gap-2 p-3 bg-white/5 rounded-lg">
-                                        <FileCode className="h-5 w-5 text-primary" />
+                                    <div className="flex items-center gap-2 p-4 bg-white/5 rounded-lg border border-white/10">
+                                        <FileCode className="h-5 w-5 text-primary flex-shrink-0" />
                                         <div className="flex-1 min-w-0">
-                                            <div className="font-medium text-sm truncate">{fileAnalysis.file}</div>
+                                            <div className="font-medium text-sm truncate font-mono">{fileAnalysis.file}</div>
                                             {fileAnalysis.metrics && (
-                                                <div className="text-xs text-muted-foreground">
+                                                <div className="text-xs text-muted-foreground mt-1">
                                                     {fileAnalysis.metrics.loc} LOC • {fileAnalysis.metrics.comments} comments • CC: {typeof fileAnalysis.metrics.complexity === 'number' ? fileAnalysis.metrics.complexity.toFixed(1) : fileAnalysis.metrics.complexity}
                                                 </div>
                                             )}
@@ -494,35 +468,35 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                                         <Button
                                             variant="outline"
                                             size="sm"
-                                            onClick={() => setIsCodeModalOpen(true)}
-                                            className="gap-2"
+                                            onClick={() => setIsModalOpen(true)}
+                                            className="gap-2 flex-shrink-0"
                                         >
                                             <Eye className="h-4 w-4" />
                                             View Code
                                         </Button>
                                         {fileAnalysis.truncated && (
-                                            <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded">Truncated</span>
+                                            <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded border border-yellow-500/30">Truncated</span>
                                         )}
                                     </div>
 
                                     {fileAnalysis.error ? (
-                                        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+                                        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
                                             {fileAnalysis.error}
                                         </div>
                                     ) : (
                                         <>
                                             {/* Purpose */}
                                             {fileAnalysis.purpose && (
-                                                <div>
-                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Purpose</div>
+                                                <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Purpose</div>
                                                     <div className="text-sm font-medium text-primary">{fileAnalysis.purpose}</div>
                                                 </div>
                                             )}
 
                                             {/* Summary */}
                                             {fileAnalysis.summary && (
-                                                <div>
-                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Summary</div>
+                                                <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Summary</div>
                                                     <div className="text-sm leading-relaxed">
                                                         <MarkdownRenderer content={String(fileAnalysis.summary || '')} />
                                                     </div>
@@ -531,14 +505,14 @@ export default function ReportPage({ params }: { params: { id: string } }) {
 
                                             {/* Key Elements */}
                                             {fileAnalysis.key_elements && fileAnalysis.key_elements.length > 0 && (
-                                                <div>
-                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Key Elements</div>
+                                                <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-3">Key Elements</div>
                                                     <div className="space-y-2">
                                                         {fileAnalysis.key_elements.map((el, i) => (
-                                                            <div key={i} className="text-sm p-2 bg-white/5 rounded">
+                                                            <div key={i} className="text-sm p-3 bg-black/30 rounded border border-white/5">
                                                                 {typeof el === 'string' ? el : (
                                                                     <>
-                                                                        <span className="font-mono text-primary">{el.name}</span>
+                                                                        <span className="font-mono text-primary font-medium">{el.name}</span>
                                                                         {el.description && <span className="text-muted-foreground"> - {el.description}</span>}
                                                                     </>
                                                                 )}
@@ -550,8 +524,8 @@ export default function ReportPage({ params }: { params: { id: string } }) {
 
                                             {/* Patterns */}
                                             {fileAnalysis.patterns && (
-                                                <div>
-                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Patterns & Libraries</div>
+                                                <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Patterns & Libraries</div>
                                                     <div className="text-sm text-muted-foreground">
                                                         <MarkdownRenderer content={String(fileAnalysis.patterns || '')} />
                                                     </div>
@@ -560,8 +534,8 @@ export default function ReportPage({ params }: { params: { id: string } }) {
 
                                             {/* Quality Notes */}
                                             {fileAnalysis.quality_notes && (
-                                                <div>
-                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Quality Notes</div>
+                                                <div className="p-4 bg-white/5 rounded-lg border border-white/10">
+                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Quality Notes</div>
                                                     <div className="text-sm text-muted-foreground">
                                                         <MarkdownRenderer content={String(fileAnalysis.quality_notes || '')} />
                                                     </div>
@@ -573,58 +547,26 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                             )}
                         </div>
 
-                        {/* Static Analysis Results */}
-                        {data.issues.length > 0 && (
-                            <div className="glass-card rounded-xl p-6">
-                                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
-                                    <AlertTriangle className="h-4 w-4 text-yellow-500" /> Static Analysis Results
-                                </h2>
-                                <div className="space-y-3">
-                                    {data.issues.slice(0, 10).map((issue, i) => (
-                                        <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-white/5 hover:bg-white/10 transition-colors">
-                                            <div className="flex items-center gap-3">
-                                                <span className={`px-2 py-0.5 text-xs font-medium rounded border ${getSeverityColor(issue.severity)}`}>
-                                                    {issue.severity}
-                                                </span>
-                                                <div>
-                                                    <div className="font-medium text-sm">{issue.title}</div>
-                                                    <div className="text-xs text-muted-foreground">
-                                                        {issue.file} <span className="text-primary">Ln {issue.line}</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <Button variant="outline" size="sm" className="text-xs">
-                                                PATCH
-                                            </Button>
-                                        </div>
-                                    ))}
-                                    {data.issues.length > 10 && (
-                                        <div className="text-center text-sm text-muted-foreground pt-2">
-                                            + {data.issues.length - 10} more issues
-                                        </div>
-                                    )}
-                                </div>
+                        {/* Issues List */}
+                        <div className="glass-card rounded-xl overflow-hidden">
+                            <div className="p-4 border-b border-white/10 bg-white/5 flex items-center justify-between">
+                                <h3 className="font-semibold flex items-center gap-2">
+                                    <AlertTriangle className="w-4 h-4 text-yellow-400" />
+                                    Detected Issues
+                                    <span className="bg-white/10 text-xs px-2 py-0.5 rounded-full">{data.issues.length}</span>
+                                </h3>
                             </div>
-                        )}
-
-                        {/* Secure Notice */}
-                        <div className="p-4 border border-green-500/20 bg-green-500/5 rounded-lg flex items-start gap-4">
-                            <ShieldCheck className="h-5 w-5 text-green-500 mt-0.5" />
-                            <div>
-                                <h4 className="text-sm font-medium text-green-200">Execution Sandbox Active</h4>
-                                <p className="text-xs text-green-200/60 mt-1">Code is statically analyzed. No makefiles, npm scripts, or binaries were executed.</p>
-                            </div>
-                        </div>
-
-                        {/* Mobile File Tree */}
-                        <div className="lg:hidden">
-                            <h3 className="font-semibold mb-4 text-sm uppercase tracking-wider text-muted-foreground">File Structure</h3>
-                            <div className="border border-white/10 rounded-lg overflow-hidden bg-black/20">
-                                <FileTree 
-                                    data={data.tree} 
-                                    onFileSelect={handleFileSelect}
-                                    selectedFile={selectedFile}
-                                />
+                            <div className="p-4 space-y-3 max-h-96 overflow-y-auto custom-scrollbar">
+                                {data.issues.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                                        <CheckCircle2 className="w-12 h-12 mb-2 text-green-500/50" />
+                                        <p>No major issues detected.</p>
+                                    </div>
+                                ) : (
+                                    data.issues.map((issue, idx) => (
+                                        <IssueCard key={idx} issue={issue} />
+                                    ))
+                                )}
                             </div>
                         </div>
                     </div>
@@ -632,17 +574,17 @@ export default function ReportPage({ params }: { params: { id: string } }) {
 
                 {/* VS Code-style vertical splitter + Right Sidebar (Resizable) */}
                 <div
-                    className="hidden xl:flex w-2 h-full cursor-col-resize group"
+                    className="hidden xl:flex w-2 h-full cursor-col-resize group hover:bg-primary/10 transition-colors"
                     onMouseDown={startResizeRight}
                     role="separator"
                     aria-orientation="vertical"
                     aria-label="Resize AI assistant panel"
                 >
-                    <div className="mx-auto h-full w-px bg-white/10 group-hover:bg-white/20" />
+                    <div className="mx-auto h-full w-px bg-white/10 group-hover:bg-primary/30" />
                 </div>
 
                 <aside
-                    className="hidden xl:flex flex-col bg-black/20"
+                    className="hidden xl:flex flex-col bg-black/20 border-l border-white/10"
                     style={{ width: assistantWidth }}
                 >
                     <AIAssistant repoId={params.id} />
@@ -650,15 +592,32 @@ export default function ReportPage({ params }: { params: { id: string } }) {
             </div>
             
             {/* Code View Modal */}
-            {fileAnalysis && (
-                <CodeViewModal
-                    isOpen={isCodeModalOpen}
-                    onClose={() => setIsCodeModalOpen(false)}
-                    repoId={params.id}
-                    filePath={selectedFile || ''}
-                    fileAnalysis={fileAnalysis}
-                />
-            )}
+            <CodeViewModal
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                repoId={params.id}
+                filePath={selectedFile || ''}
+                fileAnalysis={fileAnalysis}
+            />
         </div>
+    )
+}
+
+function FolderIcon({ className }: { className?: string }) {
+    return (
+        <svg
+            className={className}
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 2H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2Z" />
+        </svg>
     )
 }
