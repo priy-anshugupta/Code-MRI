@@ -176,16 +176,21 @@ Be direct and technical. Focus on actionable insights."""
         chain = prompt | llm | StrOutputParser()
         
         # Wait for rate limit
-        if not gemini_limiter.acquire(timeout=120):
+        user_id = f"scoring_{repo_name or 'unknown'}"
+        if not gemini_limiter.acquire(timeout=120, user_id=user_id):
             return f"Rate limited. Score: {score_data.get('final_score', 0)}/100. Please wait and refresh for AI analysis."
         
-        analysis = chain.invoke({
-            "repo_name": repo_name or "Repository",
-            "technologies": ", ".join(technologies or ["Unknown"]),
-            "score_json": json.dumps(score_data, indent=2),
-        })
-        
-        return analysis.strip()
+        try:
+            analysis = chain.invoke({
+                "repo_name": repo_name or "Repository",
+                "technologies": ", ".join(technologies or ["Unknown"]),
+                "score_json": json.dumps(score_data, indent=2),
+            })
+            gemini_limiter.record_api_success()
+            return analysis.strip()
+        except Exception as e:
+            gemini_limiter.record_api_failure()
+            raise
     except Exception as e:
         print(f"AI Scoring Agent Error: {e}")
         # Fallback to basic analysis
