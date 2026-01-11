@@ -54,19 +54,37 @@ class BranchManager:
             )
         
         try:
-            # Fetch latest from remote to ensure we have all branches
+            # Fetch latest from remote to ensure we have all branches.
+            # Important: repos cloned with `--depth` may default to single-branch; `git fetch --all`
+            # won't necessarily bring other remote heads. Force-fetch all heads with an explicit refspec.
             try:
                 subprocess.run(
-                    ["git", "fetch", "--all"],
+                    [
+                        "git",
+                        "fetch",
+                        "origin",
+                        "+refs/heads/*:refs/remotes/origin/*",
+                        "--prune",
+                    ],
                     check=True,
                     timeout=30,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    cwd=repo_path
+                    cwd=repo_path,
                 )
             except subprocess.CalledProcessError:
-                # Fetch might fail if remote is unavailable, continue with local branches
-                pass
+                try:
+                    subprocess.run(
+                        ["git", "fetch", "--all", "--prune"],
+                        check=True,
+                        timeout=30,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        cwd=repo_path,
+                    )
+                except subprocess.CalledProcessError:
+                    # Fetch might fail if remote is unavailable, continue with local branches
+                    pass
             
             # Get list of all branches (local and remote)
             result = subprocess.run(
@@ -392,8 +410,50 @@ class BranchManager:
             )
         
         try:
-            # Check if branch exists locally
-            result = subprocess.run(
+            # First, discard any local changes to avoid checkout conflicts
+            try:
+                subprocess.run(
+                    ["git", "reset", "--hard"],
+                    check=True,
+                    timeout=10,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=repo_path
+                )
+                subprocess.run(
+                    ["git", "clean", "-fd"],
+                    check=True,
+                    timeout=10,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=repo_path
+                )
+            except subprocess.CalledProcessError:
+                # Reset might fail if repository is in a bad state, but we can still try to checkout
+                pass
+            
+            # Fetch all branches from remote to ensure we have latest refs
+            try:
+                subprocess.run(
+                    [
+                        "git",
+                        "fetch",
+                        "origin",
+                        "+refs/heads/*:refs/remotes/origin/*",
+                        "--prune",
+                    ],
+                    check=True,
+                    timeout=30,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=repo_path
+                )
+            except subprocess.CalledProcessError:
+                # Fetch might fail if remote is unavailable, but we can still try to checkout
+                pass
+            
+            # Check if branch exists locally or remotely
+            branch_list_result = subprocess.run(
                 ["git", "branch", "-a"],
                 check=True,
                 capture_output=True,
@@ -401,34 +461,69 @@ class BranchManager:
                 cwd=repo_path
             )
             
-            branch_exists = False
-            remote_branch = f"origin/{branch}"
+            local_branch_exists = False
+            remote_branch_exists = False
             
-            for line in result.stdout.split('\n'):
-                if branch in line.strip() or remote_branch in line.strip():
-                    branch_exists = True
-                    break
+            for line in branch_list_result.stdout.split('\n'):
+                line_stripped = line.strip()
+                # Check if it's a local branch
+                if line_stripped == branch or line_stripped == f"* {branch}":
+                    local_branch_exists = True
+                # Check if it's a remote branch
+                if f"remotes/origin/{branch}" in line_stripped:
+                    remote_branch_exists = True
             
-            if not branch_exists:
-                # Fetch the branch from remote
+            # Perform checkout based on branch existence
+            if local_branch_exists:
+                # Branch exists locally, just checkout
                 subprocess.run(
-                    ["git", "fetch", "origin", branch],
+                    ["git", "checkout", branch],
                     check=True,
-                    timeout=30,
+                    timeout=10,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     cwd=repo_path
                 )
-            
-            # Switch to the branch
-            subprocess.run(
-                ["git", "checkout", branch],
-                check=True,
-                timeout=10,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=repo_path
-            )
+                # Update from remote if available
+                try:
+                    subprocess.run(
+                        ["git", "pull", "origin", branch],
+                        check=True,
+                        timeout=30,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        cwd=repo_path
+                    )
+                except subprocess.CalledProcessError:
+                    # Pull might fail, but we're already on the branch
+                    pass
+            elif remote_branch_exists:
+                # Branch exists remotely but not locally, create local tracking branch
+                try:
+                    subprocess.run(
+                        ["git", "checkout", "-b", branch, f"origin/{branch}"],
+                        check=True,
+                        timeout=10,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        cwd=repo_path
+                    )
+                except subprocess.CalledProcessError as e:
+                    # If creating with -b fails (branch might exist), try simple checkout
+                    subprocess.run(
+                        ["git", "checkout", branch],
+                        check=True,
+                        timeout=10,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        cwd=repo_path
+                    )
+            else:
+                # Branch doesn't exist anywhere
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Branch '{branch}' not found in repository"
+                )
             
             # Get the current commit SHA
             sha_result = subprocess.run(
@@ -449,10 +544,14 @@ class BranchManager:
             )
             
         except subprocess.CalledProcessError as e:
+            error_msg = e.stderr.decode() if e.stderr else str(e)
             raise HTTPException(
                 status_code=400, 
-                detail=f"Branch switch failed: {e.stderr.decode() if e.stderr else str(e)}"
+                detail=f"Branch switch failed: {error_msg}"
             )
+        except HTTPException:
+            # Re-raise HTTP exceptions as-is
+            raise
         except Exception as e:
             raise HTTPException(
                 status_code=500, 

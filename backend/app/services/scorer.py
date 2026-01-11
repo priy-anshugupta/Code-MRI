@@ -190,10 +190,15 @@ Be direct and technical. Focus on actionable insights."""
             return analysis.strip()
         except Exception as e:
             gemini_limiter.record_api_failure()
+            error_str = str(e)
+            # Check if it's a quota error
+            if "RESOURCE_EXHAUSTED" in error_str or "quota" in error_str.lower():
+                print(f"AI Scoring Agent - Quota Exceeded: Using fallback analysis")
+            else:
+                print(f"AI Scoring Agent Error: {e}")
             raise
     except Exception as e:
-        print(f"AI Scoring Agent Error: {e}")
-        # Fallback to basic analysis
+        # Fallback to basic analysis when AI fails
         score = score_data.get('final_score', 0)
         if score >= 80:
             quality = "excellent"

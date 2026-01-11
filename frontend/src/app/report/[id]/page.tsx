@@ -434,6 +434,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                                             <BranchSelector
                                                 repoId={params.id}
                                                 currentBranch={currentBranch}
+                                                branches={branches}
                                                 onBranchChange={handleBranchChange}
                                             />
                                             

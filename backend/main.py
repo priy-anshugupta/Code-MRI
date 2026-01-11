@@ -73,12 +73,19 @@ _cleanup_thread: Optional[threading.Thread] = None
 
 def _cleanup_all_repos() -> None:
     """Delete all cloned repos in any temp_clones folder."""
+    print("Starting cleanup of all temporary repositories...")
+    repos_cleaned = 0
+    
     # 1) Clean temp_clones relative to current working directory (backend/temp_clones when run from backend)
     if os.path.exists(settings.TEMP_DIR):
         for entry in os.listdir(settings.TEMP_DIR):
             entry_path = os.path.join(settings.TEMP_DIR, entry)
             if os.path.isdir(entry_path):
-                shutil.rmtree(entry_path, ignore_errors=True)
+                try:
+                    shutil.rmtree(entry_path, ignore_errors=True)
+                    repos_cleaned += 1
+                except Exception as e:
+                    print(f"Error cleaning {entry_path}: {e}")
 
     # 2) Also clean a temp_clones directory at the project root, if it exists
     try:
@@ -88,18 +95,27 @@ def _cleanup_all_repos() -> None:
             for entry in os.listdir(root_temp):
                 entry_path = root_temp / entry
                 if entry_path.is_dir():
-                    shutil.rmtree(entry_path, ignore_errors=True)
+                    try:
+                        shutil.rmtree(entry_path, ignore_errors=True)
+                        repos_cleaned += 1
+                    except Exception as e:
+                        print(f"Error cleaning {entry_path}: {e}")
     except Exception as e:
         # Best-effort cleanup; log and continue
         print(f"Error cleaning root temp_clones: {e}")
+    
     with _cleanup_lock:
         repo_access_times.clear()
+    
     # Also wipe all FAISS and fallback indexes
     delete_all_indexes()
+    
     # Clean up branch metadata and analysis cache
     analysis_cache.clear_all_cache()
     for repo_id in branch_storage.get_all_repo_ids():
         branch_storage.cleanup_repo_metadata(repo_id)
+    
+    print(f"Cleanup complete: removed {repos_cleaned} temporary repositories")
 
 
 @asynccontextmanager
@@ -122,6 +138,7 @@ async def lifespan(app: FastAPI):
     yield
     
     # Cleanup on shutdown: stop thread and delete all temp repos
+    print("Server shutting down - initiating cleanup...")
     _cleanup_stop.set()
     _cleanup_all_repos()
     
@@ -137,7 +154,7 @@ async def lifespan(app: FastAPI):
     # Close database connections
     data_persistence.close()
     
-    print("Shutdown: cleaned up all temp_clones and stopped async pipeline")
+    print("Shutdown complete: all temporary data cleaned up")
 
 
 app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
@@ -305,8 +322,13 @@ async def get_report(repo_id: str, branch: Optional[str] = None):
             grading_explanation = await enhanced_grading.explain_grading_decisions(detailed_scores)
             ai_grading_explanation = grading_explanation.overall_explanation
         except Exception as e:
-            print(f"AI Grading Explanation Error: {e}")
-            ai_grading_explanation = f"AI explanation unavailable: {str(e)}"
+            error_str = str(e)
+            if "RESOURCE_EXHAUSTED" in error_str or "quota" in error_str.lower():
+                print(f"AI Grading - Quota Exceeded: Continuing without AI explanation")
+                ai_grading_explanation = "AI-powered grading explanation is currently unavailable due to API quota limits. The analysis will continue with computed scores."
+            else:
+                print(f"AI Grading Explanation Error: {e}")
+                ai_grading_explanation = "AI explanation temporarily unavailable."
         
         # Compute traditional AI-powered scores for backward compatibility
         score_data = compute_repo_score(repo_path)

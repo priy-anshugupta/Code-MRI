@@ -158,9 +158,10 @@ export const HistoricalTrendChart: React.FC<HistoricalTrendChartProps> = ({
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string>('')
     const [selectedVisualization, setSelectedVisualization] = useState(0)
+    const [hasFetched, setHasFetched] = useState(false)
 
     useEffect(() => {
-        if (repoId && branchName) {
+        if (repoId && branchName && !hasFetched) {
             fetchTrendData()
         }
     }, [repoId, branchName, daysBack]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -168,6 +169,7 @@ export const HistoricalTrendChart: React.FC<HistoricalTrendChartProps> = ({
     const fetchTrendData = async () => {
         setLoading(true)
         setError('')
+        setHasFetched(true)
         
         try {
             // Fetch trend analysis
@@ -187,7 +189,12 @@ export const HistoricalTrendChart: React.FC<HistoricalTrendChartProps> = ({
             
         } catch (err: any) {
             console.error('Failed to fetch trend data:', err)
-            setError(err.response?.data?.detail || 'Failed to load historical trend data')
+            // Handle 404 specifically (feature not yet implemented)
+            if (err.response?.status === 404) {
+                setError('Historical trend data not available yet. This feature requires multiple analyses over time.')
+            } else {
+                setError(err.response?.data?.detail || 'Failed to load historical trend data')
+            }
         } finally {
             setLoading(false)
         }

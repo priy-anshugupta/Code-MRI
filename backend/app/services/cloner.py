@@ -41,8 +41,9 @@ def clone_repository(url: str, branch: str = None) -> str:
             # Clone specific branch with full history for branch switching
             clone_cmd.extend(["--branch", branch])
         else:
-            # Default shallow clone for backward compatibility
-            clone_cmd.extend(["--depth", "1"])
+            # Shallow clone, but keep ALL remote branches available.
+            # Note: `--depth` implies `--single-branch` unless `--no-single-branch` is set.
+            clone_cmd.extend(["--depth", "1", "--no-single-branch"])
         
         clone_cmd.extend([url, temp_path])
         

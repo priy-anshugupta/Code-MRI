@@ -20,6 +20,7 @@ interface BranchInfo {
 interface BranchSelectorProps {
     repoId: string
     currentBranch?: string
+    branches?: BranchInfo[]  // Optional: if provided, won't fetch
     onBranchChange?: (branch: string, branchInfo: BranchInfo) => void
     className?: string
 }
@@ -27,10 +28,11 @@ interface BranchSelectorProps {
 export const BranchSelector: React.FC<BranchSelectorProps> = ({
     repoId,
     currentBranch,
+    branches: branchesProp,
     onBranchChange,
     className
 }) => {
-    const [branches, setBranches] = useState<BranchInfo[]>([])
+    const [branches, setBranches] = useState<BranchInfo[]>(branchesProp || [])
     const [selectedBranch, setSelectedBranch] = useState<string>(currentBranch || '')
     const [isOpen, setIsOpen] = useState(false)
     const [loading, setLoading] = useState(false)
@@ -42,10 +44,26 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
         retryDelay: 1500
     })
 
-    // Fetch branches on component mount
+    // Update branches when prop changes
     useEffect(() => {
-        fetchBranches()
-    }, [repoId]) // eslint-disable-line react-hooks/exhaustive-deps
+        if (branchesProp && branchesProp.length > 0) {
+            setBranches(branchesProp)
+        }
+    }, [branchesProp])
+
+    // Fetch branches on component mount only if not provided
+    useEffect(() => {
+        if (!branchesProp && branches.length === 0) {
+            fetchBranches()
+        }
+    }, [repoId, branchesProp]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Sync selectedBranch with currentBranch prop
+    useEffect(() => {
+        if (currentBranch && currentBranch !== selectedBranch) {
+            setSelectedBranch(currentBranch)
+        }
+    }, [currentBranch])
 
     // Handle click outside to close dropdown
     useEffect(() => {
@@ -74,6 +92,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                 setSelectedBranch(defaultBranch.name)
             }
         } catch (error) {
+            console.error('BranchSelector fetch error:', error)
             // Error is handled by errorHandler
         } finally {
             setLoading(false)
@@ -199,9 +218,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                         className="absolute top-full left-0 right-0 mt-2 bg-black/90 backdrop-blur-xl border border-white/10 rounded-lg shadow-2xl z-50 max-h-64 overflow-y-auto custom-scrollbar"
                     >
                         {branches.length === 0 ? (
-                            <div className="p-4 text-center text-muted-foreground text-sm">
-                                No branches found
-                            </div>
+                            <div className="p-4 text-center text-muted-foreground text-sm">No branches found</div>
                         ) : (
                             <div className="p-2">
                                 {branches.map((branch) => (
@@ -230,16 +247,10 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                                                 )}
                                             </div>
                                             <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                                                <span className="font-mono">
-                                                    {branch.commit_sha.substring(0, 7)}
-                                                </span>
-                                                <span>
-                                                    {formatDate(branch.last_commit_date)}
-                                                </span>
+                                                <span className="font-mono">{branch.commit_sha.substring(0, 7)}</span>
+                                                <span>{formatDate(branch.last_commit_date)}</span>
                                                 {branch.last_analyzed && (
-                                                    <span className="text-green-400">
-                                                        ✓ Analyzed
-                                                    </span>
+                                                    <span className="text-green-400">✓ Analyzed</span>
                                                 )}
                                             </div>
                                         </div>
