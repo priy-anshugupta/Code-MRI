@@ -177,6 +177,15 @@ export const HistoricalTrendChart: React.FC<HistoricalTrendChartProps> = ({
                 params: { days_back: daysBack }
             })
             
+            // Check if we have data
+            if (!trendResponse.data.has_data || !trendResponse.data.analysis) {
+                // This is not an error, just no data yet - use the empty state instead
+                setTrendAnalysis(null)
+                setVisualizations([])
+                setLoading(false)
+                return
+            }
+            
             const analysis = trendResponse.data.analysis as BranchTrendAnalysis
             setTrendAnalysis(analysis)
             
@@ -184,6 +193,15 @@ export const HistoricalTrendChart: React.FC<HistoricalTrendChartProps> = ({
             const vizResponse = await api.get(`/historical-trends/${repoId}/${branchName}/visualizations`, {
                 params: { days_back: daysBack, chart_type: 'line' }
             })
+            
+            // Check if we have visualization data
+            if (!vizResponse.data.has_data || !vizResponse.data.visualizations || vizResponse.data.visualizations.length === 0) {
+                // This is not an error, just no data yet - use the empty state instead
+                setTrendAnalysis(null)
+                setVisualizations([])
+                setLoading(false)
+                return
+            }
             
             setVisualizations(vizResponse.data.visualizations as VisualizationData[])
             

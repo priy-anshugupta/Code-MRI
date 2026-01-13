@@ -911,7 +911,7 @@ List the THREE most impactful improvements in order:
             
             prompt = ChatPromptTemplate.from_template(template)
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 temperature=0.3,
                 google_api_key=settings.GOOGLE_API_KEY,
             )

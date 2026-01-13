@@ -51,14 +51,21 @@ class HistoricalDataPoint:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'HistoricalDataPoint':
         """Create from dictionary."""
+        # Safe datetime parsing with fallback
+        try:
+            timestamp = datetime.fromisoformat(data["timestamp"])
+        except (ValueError, TypeError, KeyError):
+            # Fallback to current time if parsing fails
+            timestamp = datetime.now()
+        
         return cls(
-            timestamp=datetime.fromisoformat(data["timestamp"]),
-            commit_sha=data["commit_sha"],
-            branch_name=data["branch_name"],
-            overall_score=data["overall_score"],
-            category_scores=data["category_scores"],
-            total_files=data["total_files"],
-            total_loc=data["total_loc"]
+            timestamp=timestamp,
+            commit_sha=data.get("commit_sha", ""),
+            branch_name=data.get("branch_name", ""),
+            overall_score=data.get("overall_score", 0.0),
+            category_scores=data.get("category_scores", {}),
+            total_files=data.get("total_files", 0),
+            total_loc=data.get("total_loc", 0)
         )
 
 
@@ -173,16 +180,28 @@ class HistoricalTrendsAnalyzer:
         Args:
             analysis_result: Branch analysis result to store
         """
-        # Create historical data point
-        data_point = HistoricalDataPoint(
-            timestamp=analysis_result.analysis_timestamp,
-            commit_sha=analysis_result.commit_sha,
-            branch_name=analysis_result.branch_name,
-            overall_score=analysis_result.metrics.get('overall_score', 0),
-            category_scores=self._extract_category_scores(analysis_result.metrics),
-            total_files=analysis_result.metrics.get('metadata', {}).get('total_files_analyzed', 0),
-            total_loc=analysis_result.metrics.get('metadata', {}).get('total_loc', 0)
-        )
+        if not analysis_result:
+            print("Warning: Cannot store None analysis result")
+            return
+        
+        # Safely extract metrics
+        metrics = analysis_result.metrics if analysis_result.metrics else {}
+        metadata = metrics.get('metadata', {}) if isinstance(metrics, dict) else {}
+        
+        # Create historical data point with safe defaults
+        try:
+            data_point = HistoricalDataPoint(
+                timestamp=analysis_result.analysis_timestamp if analysis_result.analysis_timestamp else datetime.now(),
+                commit_sha=analysis_result.commit_sha if analysis_result.commit_sha else "",
+                branch_name=analysis_result.branch_name if analysis_result.branch_name else "",
+                overall_score=float(metrics.get('overall_score', 0)),
+                category_scores=self._extract_category_scores(metrics),
+                total_files=int(metadata.get('total_files_analyzed', 0)) if isinstance(metadata, dict) else 0,
+                total_loc=int(metadata.get('total_loc', 0)) if isinstance(metadata, dict) else 0
+            )
+        except (ValueError, TypeError, AttributeError) as e:
+            print(f"Error creating historical data point: {e}")
+            return
         
         # Store to file
         file_path = os.path.join(
@@ -236,60 +255,70 @@ class HistoricalTrendsAnalyzer:
         Returns:
             BranchTrendAnalysis or None if insufficient data
         """
-        # Load historical data
-        historical_data = self._load_historical_data(repo_id, branch_name)
-        if len(historical_data) < 2:
-            return None
-        
-        # Filter by time period
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days_back)
-        
-        filtered_data = [
-            dp for dp in historical_data 
-            if start_date <= dp.timestamp <= end_date
-        ]
-        
-        if len(filtered_data) < 2:
-            return None
-        
-        # Calculate overall trend
-        overall_trend = self._calculate_trend_metrics(
-            [(dp.timestamp, dp.overall_score) for dp in filtered_data]
-        )
-        
-        # Calculate category trends
-        category_trends = {}
-        all_categories = set()
-        for dp in filtered_data:
-            all_categories.update(dp.category_scores.keys())
-        
-        for category in all_categories:
-            category_data = []
-            for dp in filtered_data:
-                if category in dp.category_scores:
-                    category_data.append((dp.timestamp, dp.category_scores[category]))
+        try:
+            # Load historical data
+            historical_data = self._load_historical_data(repo_id, branch_name)
+            if not historical_data or len(historical_data) < 2:
+                return None
             
-            if len(category_data) >= 2:
-                trend_metrics = self._calculate_trend_metrics(category_data)
-                category_trends[category] = CategoryTrend(
-                    category=category,
-                    metrics=trend_metrics,
-                    data_points=category_data
-                )
-        
-        # Generate summary
-        summary = self._generate_trend_summary(overall_trend, category_trends, len(filtered_data))
-        
-        return BranchTrendAnalysis(
-            repo_id=repo_id,
-            branch_name=branch_name,
-            analysis_period=(start_date, end_date),
-            overall_trend=overall_trend,
-            category_trends=category_trends,
-            data_points=filtered_data,
-            summary=summary
-        )
+            # Filter by time period
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=max(1, days_back))
+            
+            filtered_data = [
+                dp for dp in historical_data 
+                if dp.timestamp and start_date <= dp.timestamp <= end_date
+            ]
+            
+            if len(filtered_data) < 2:
+                return None
+            
+            # Calculate overall trend
+            overall_trend = self._calculate_trend_metrics(
+                [(dp.timestamp, dp.overall_score) for dp in filtered_data if dp.timestamp]
+            )
+            
+            # Calculate category trends
+            category_trends = {}
+            all_categories = set()
+            for dp in filtered_data:
+                if dp.category_scores and isinstance(dp.category_scores, dict):
+                    all_categories.update(dp.category_scores.keys())
+            
+            for category in all_categories:
+                category_data = []
+                for dp in filtered_data:
+                    if dp.category_scores and isinstance(dp.category_scores, dict) and category in dp.category_scores:
+                        try:
+                            score = float(dp.category_scores[category])
+                            if dp.timestamp:
+                                category_data.append((dp.timestamp, score))
+                        except (ValueError, TypeError):
+                            continue
+                
+                if len(category_data) >= 2:
+                    trend_metrics = self._calculate_trend_metrics(category_data)
+                    category_trends[category] = CategoryTrend(
+                        category=category,
+                        metrics=trend_metrics,
+                        data_points=category_data
+                    )
+            
+            # Generate summary
+            summary = self._generate_trend_summary(overall_trend, category_trends, len(filtered_data))
+            
+            return BranchTrendAnalysis(
+                repo_id=repo_id,
+                branch_name=branch_name,
+                analysis_period=(start_date, end_date),
+                overall_trend=overall_trend,
+                category_trends=category_trends,
+                data_points=filtered_data,
+                summary=summary
+            )
+        except Exception as e:
+            print(f"Error calculating branch trends: {e}")
+            return None
     
     def prepare_visualization_data(
         self, 
@@ -306,19 +335,31 @@ class HistoricalTrendsAnalyzer:
         Returns:
             List of visualization data objects
         """
+        if not trend_analysis:
+            return []
+        
         visualizations = []
         
-        # Overall score trend visualization
-        overall_viz = self._create_overall_score_visualization(trend_analysis, chart_type)
-        visualizations.append(overall_viz)
+        try:
+            # Overall score trend visualization
+            overall_viz = self._create_overall_score_visualization(trend_analysis, chart_type)
+            visualizations.append(overall_viz)
+        except Exception as e:
+            print(f"Error creating overall score visualization: {e}")
         
-        # Category trends visualization
-        category_viz = self._create_category_trends_visualization(trend_analysis, chart_type)
-        visualizations.append(category_viz)
+        try:
+            # Category trends visualization
+            category_viz = self._create_category_trends_visualization(trend_analysis, chart_type)
+            visualizations.append(category_viz)
+        except Exception as e:
+            print(f"Error creating category trends visualization: {e}")
         
-        # Quality metrics comparison
-        metrics_viz = self._create_metrics_comparison_visualization(trend_analysis)
-        visualizations.append(metrics_viz)
+        try:
+            # Quality metrics comparison
+            metrics_viz = self._create_metrics_comparison_visualization(trend_analysis)
+            visualizations.append(metrics_viz)
+        except Exception as e:
+            print(f"Error creating metrics comparison visualization: {e}")
         
         return visualizations
     
@@ -341,59 +382,70 @@ class HistoricalTrendsAnalyzer:
         Returns:
             Comparison data or None if insufficient data
         """
-        trend1 = self.calculate_branch_trends(repo_id, branch1, days_back)
-        trend2 = self.calculate_branch_trends(repo_id, branch2, days_back)
-        
-        if not trend1 or not trend2:
-            return None
-        
-        comparison = {
-            "branch1": {
-                "name": branch1,
-                "overall_trend": trend1.overall_trend.to_dict(),
-                "final_score": trend1.overall_trend.end_value
-            },
-            "branch2": {
-                "name": branch2,
-                "overall_trend": trend2.overall_trend.to_dict(),
-                "final_score": trend2.overall_trend.end_value
-            },
-            "comparison": {
-                "score_difference": trend2.overall_trend.end_value - trend1.overall_trend.end_value,
-                "trend_difference": trend2.overall_trend.slope - trend1.overall_trend.slope,
-                "better_performing": branch2 if trend2.overall_trend.end_value > trend1.overall_trend.end_value else branch1
-            },
-            "category_comparisons": {}
-        }
-        
-        # Compare category trends
-        common_categories = set(trend1.category_trends.keys()) & set(trend2.category_trends.keys())
-        for category in common_categories:
-            cat1 = trend1.category_trends[category]
-            cat2 = trend2.category_trends[category]
+        try:
+            trend1 = self.calculate_branch_trends(repo_id, branch1, days_back)
+            trend2 = self.calculate_branch_trends(repo_id, branch2, days_back)
             
-            comparison["category_comparisons"][category] = {
-                "branch1_trend": cat1.metrics.direction.value,
-                "branch2_trend": cat2.metrics.direction.value,
-                "score_difference": cat2.metrics.end_value - cat1.metrics.end_value,
-                "better_performing": branch2 if cat2.metrics.end_value > cat1.metrics.end_value else branch1
+            if not trend1 or not trend2:
+                return None
+            
+            comparison = {
+                "branch1": {
+                    "name": branch1,
+                    "overall_trend": trend1.overall_trend.to_dict(),
+                    "final_score": trend1.overall_trend.end_value
+                },
+                "branch2": {
+                    "name": branch2,
+                    "overall_trend": trend2.overall_trend.to_dict(),
+                    "final_score": trend2.overall_trend.end_value
+                },
+                "comparison": {
+                    "score_difference": trend2.overall_trend.end_value - trend1.overall_trend.end_value,
+                    "trend_difference": trend2.overall_trend.slope - trend1.overall_trend.slope,
+                    "better_performing": branch2 if trend2.overall_trend.end_value > trend1.overall_trend.end_value else branch1
+                },
+                "category_comparisons": {}
             }
-        
-        return comparison
+            
+            # Compare category trends
+            common_categories = set(trend1.category_trends.keys()) & set(trend2.category_trends.keys())
+            for category in common_categories:
+                cat1 = trend1.category_trends[category]
+                cat2 = trend2.category_trends[category]
+                
+                comparison["category_comparisons"][category] = {
+                    "branch1_trend": cat1.metrics.direction.value,
+                    "branch2_trend": cat2.metrics.direction.value,
+                    "score_difference": cat2.metrics.end_value - cat1.metrics.end_value,
+                    "better_performing": branch2 if cat2.metrics.end_value > cat1.metrics.end_value else branch1
+                }
+            
+            return comparison
+        except Exception as e:
+            print(f"Error comparing branch trends: {e}")
+            return None
     
     def _extract_category_scores(self, metrics: Dict[str, Any]) -> Dict[str, float]:
         """Extract category scores from metrics dictionary."""
         category_scores = {}
+        
+        if not metrics or not isinstance(metrics, dict):
+            return category_scores
         
         # Handle different metrics formats
         if 'category_scores' in metrics:
             cat_scores = metrics['category_scores']
             if isinstance(cat_scores, dict):
                 for category, score_data in cat_scores.items():
-                    if isinstance(score_data, dict) and 'score' in score_data:
-                        category_scores[category] = score_data['score']
-                    elif isinstance(score_data, (int, float)):
-                        category_scores[category] = score_data
+                    try:
+                        if isinstance(score_data, dict) and 'score' in score_data:
+                            category_scores[category] = float(score_data['score'])
+                        elif isinstance(score_data, (int, float)):
+                            category_scores[category] = float(score_data)
+                    except (ValueError, TypeError):
+                        # Skip invalid score data
+                        continue
         
         return category_scores
     

@@ -434,8 +434,9 @@ class EnhancedRateLimiter:
 
 
 # Global enhanced rate limiter instance for Gemini API calls
-# 5 requests per minute with burst of 2
-gemini_limiter = EnhancedRateLimiter(requests_per_minute=5, burst_size=2)
+# Free tier limits: 15 requests per minute, 1500 per day
+# Conservative setting: 2 requests per minute to avoid hitting limits
+gemini_limiter = EnhancedRateLimiter(requests_per_minute=2, burst_size=1)
 
 
 def rate_limited_call(func, *args, timeout: float = 120.0, user_id: Optional[str] = None, **kwargs):

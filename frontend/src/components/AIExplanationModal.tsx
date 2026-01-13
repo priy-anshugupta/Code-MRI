@@ -164,7 +164,7 @@ export const AIExplanationModal: React.FC<AIExplanationModalProps> = ({
             }
 
             const response = await errorHandler.execute(() => 
-                api.post('/explain', payload, { timeout: 30000 })
+                api.post('/explain', payload, { timeout: 120000 })
             )
 
             setData(response.data)

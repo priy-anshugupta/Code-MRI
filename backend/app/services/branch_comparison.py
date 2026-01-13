@@ -192,40 +192,48 @@ class BranchComparisonEngine:
         Returns:
             BranchComparison: Complete comparison results
         """
-        # Generate quality diff
-        quality_diff = self.generate_quality_diff(base_analysis, compare_analysis)
+        # Validate inputs
+        if not base_analysis or not compare_analysis:
+            raise ValueError("Both base and compare analysis results are required")
         
-        # Identify quality changes
-        quality_changes = self._identify_quality_changes(quality_diff)
-        
-        # Analyze file changes
-        file_changes = self._analyze_file_changes(base_analysis, compare_analysis)
-        
-        # Generate recommendations
-        recommendations = self._generate_comparison_recommendations(
-            quality_diff, quality_changes, file_changes
-        )
-        
-        # Generate summary
-        summary = self._generate_comparison_summary(
-            base_analysis.branch_name, 
-            compare_analysis.branch_name,
-            quality_diff,
-            quality_changes
-        )
-        
-        return BranchComparison(
-            base_branch=base_analysis.branch_name,
-            compare_branch=compare_analysis.branch_name,
-            base_commit_sha=base_analysis.commit_sha,
-            compare_commit_sha=compare_analysis.commit_sha,
-            comparison_timestamp=datetime.now(),
-            score_diff=quality_diff,
-            quality_changes=quality_changes,
-            file_changes=file_changes,
-            recommendations=recommendations,
-            summary=summary
-        )
+        try:
+            # Generate quality diff
+            quality_diff = self.generate_quality_diff(base_analysis, compare_analysis)
+            
+            # Identify quality changes
+            quality_changes = self._identify_quality_changes(quality_diff)
+            
+            # Analyze file changes
+            file_changes = self._analyze_file_changes(base_analysis, compare_analysis)
+            
+            # Generate recommendations
+            recommendations = self._generate_comparison_recommendations(
+                quality_diff, quality_changes, file_changes
+            )
+            
+            # Generate summary
+            summary = self._generate_comparison_summary(
+                base_analysis.branch_name if base_analysis.branch_name else "unknown", 
+                compare_analysis.branch_name if compare_analysis.branch_name else "unknown",
+                quality_diff,
+                quality_changes
+            )
+            
+            return BranchComparison(
+                base_branch=base_analysis.branch_name if base_analysis.branch_name else "unknown",
+                compare_branch=compare_analysis.branch_name if compare_analysis.branch_name else "unknown",
+                base_commit_sha=base_analysis.commit_sha if base_analysis.commit_sha else "",
+                compare_commit_sha=compare_analysis.commit_sha if compare_analysis.commit_sha else "",
+                comparison_timestamp=datetime.now(),
+                score_diff=quality_diff,
+                quality_changes=quality_changes,
+                file_changes=file_changes,
+                recommendations=recommendations,
+                summary=summary
+            )
+        except Exception as e:
+            print(f"Error comparing branches: {e}")
+            raise
     
     def generate_quality_diff(
         self, 
@@ -243,31 +251,55 @@ class BranchComparisonEngine:
             QualityDiff: Detailed quality differences
         """
         # Extract scores from metrics (assuming they contain DetailedScoreReport data)
-        base_metrics = base_analysis.metrics
-        compare_metrics = compare_analysis.metrics
+        base_metrics = base_analysis.metrics if base_analysis.metrics else {}
+        compare_metrics = compare_analysis.metrics if compare_analysis.metrics else {}
         
         # Calculate overall score difference
-        base_overall = base_metrics.get('overall_score', 0)
-        compare_overall = compare_metrics.get('overall_score', 0)
+        base_overall = float(base_metrics.get('overall_score', 0))
+        compare_overall = float(compare_metrics.get('overall_score', 0))
         overall_diff = compare_overall - base_overall
         
         # Get grade changes
-        base_grade = base_metrics.get('overall_grade', 'F')
-        compare_grade = compare_metrics.get('overall_grade', 'F')
+        base_grade = str(base_metrics.get('overall_grade', 'F'))
+        compare_grade = str(compare_metrics.get('overall_grade', 'F'))
         
         # Calculate category differences
         category_diffs = {}
         base_categories = base_metrics.get('category_scores', {})
         compare_categories = compare_metrics.get('category_scores', {})
         
+        # Ensure both are dictionaries
+        if not isinstance(base_categories, dict):
+            base_categories = {}
+        if not isinstance(compare_categories, dict):
+            compare_categories = {}
+        
         all_categories = set(base_categories.keys()) | set(compare_categories.keys())
         
         for category in all_categories:
-            base_score = base_categories.get(category, {}).get('score', 0) if isinstance(base_categories.get(category), dict) else 0
-            compare_score = compare_categories.get(category, {}).get('score', 0) if isinstance(compare_categories.get(category), dict) else 0
+            # Safely extract scores
+            try:
+                base_cat = base_categories.get(category, {})
+                if isinstance(base_cat, dict):
+                    base_score = float(base_cat.get('score', 0))
+                elif isinstance(base_cat, (int, float)):
+                    base_score = float(base_cat)
+                else:
+                    base_score = 0.0
+                    
+                compare_cat = compare_categories.get(category, {})
+                if isinstance(compare_cat, dict):
+                    compare_score = float(compare_cat.get('score', 0))
+                elif isinstance(compare_cat, (int, float)):
+                    compare_score = float(compare_cat)
+                else:
+                    compare_score = 0.0
+            except (ValueError, TypeError):
+                base_score = 0.0
+                compare_score = 0.0
             
             difference = compare_score - base_score
-            percentage_change = (difference / base_score * 100) if base_score > 0 else 0
+            percentage_change = (difference / base_score * 100) if base_score > 0 else 0.0
             
             # Determine change type
             if abs(difference) < self.significance_threshold:
@@ -405,19 +437,33 @@ class BranchComparisonEngine:
             
             if base_file and compare_file:
                 # File exists in both branches - modified or unchanged
-                base_score = base_file.get('overall_score', 0)
-                compare_score = compare_file.get('overall_score', 0)
-                score_change = compare_score - base_score
+                try:
+                    base_score = float(base_file.get('overall_score', 0))
+                    compare_score = float(compare_file.get('overall_score', 0))
+                    score_change = compare_score - base_score
+                except (ValueError, TypeError):
+                    base_score = 0.0
+                    compare_score = 0.0
+                    score_change = 0.0
                 
                 # Calculate metrics changes
                 base_metrics = base_file.get('metrics', {})
                 compare_metrics = compare_file.get('metrics', {})
                 
+                # Ensure metrics are dictionaries
+                if not isinstance(base_metrics, dict):
+                    base_metrics = {}
+                if not isinstance(compare_metrics, dict):
+                    compare_metrics = {}
+                
                 metrics_change = {}
                 for metric in ['loc', 'complexity', 'comments']:
-                    base_val = base_metrics.get(metric, 0) if isinstance(base_metrics, dict) else 0
-                    compare_val = compare_metrics.get(metric, 0) if isinstance(compare_metrics, dict) else 0
-                    metrics_change[metric] = compare_val - base_val
+                    try:
+                        base_val = float(base_metrics.get(metric, 0))
+                        compare_val = float(compare_metrics.get(metric, 0))
+                        metrics_change[metric] = compare_val - base_val
+                    except (ValueError, TypeError):
+                        metrics_change[metric] = 0.0
                 
                 change_type = "modified" if abs(score_change) > 1 else "unchanged"
                 

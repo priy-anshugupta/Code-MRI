@@ -346,7 +346,7 @@ async def get_report(repo_id: str, branch: Optional[str] = None):
             "metrics": metrics,
             "issues": issues,
             "summary": summary,
-            "score": score_data,  # Legacy scoring for backward compatibility
+            "scoring": score_data,  # Changed from 'score' to 'scoring' for frontend consistency
             "ai_analysis": ai_score_analysis,  # Legacy AI analysis
             "detailed_scores": detailed_scores.to_dict(),  # New enhanced grading
             "ai_grading_explanation": ai_grading_explanation,  # New AI explanations
@@ -387,6 +387,7 @@ async def get_report(repo_id: str, branch: Optional[str] = None):
             if branch and commit_sha:
                 # Store the analysis result for historical tracking
                 historical_analyzer.store_analysis_result(branch_analysis)
+                print(f"Stored historical data for {repo_id}/{branch}")
                 
                 # Also store in database for persistence
                 data_sync.sync_analysis_result(branch_analysis)
@@ -422,6 +423,7 @@ async def get_report(repo_id: str, branch: Optional[str] = None):
                     metrics=detailed_scores.to_dict()
                 )
                 historical_analyzer.store_analysis_result(default_analysis)
+                print(f"Stored historical data for {repo_id}/unknown-branch")
                 
                 # Store in database
                 data_sync.sync_analysis_result(default_analysis)
@@ -566,8 +568,11 @@ async def explain_endpoint(request: ExplainRequest):
     try:
         # Wait for rate limit before making AI call
         user_id = f"explain_{request.repo_id}"
-        if not gemini_limiter.acquire(timeout=120, user_id=user_id):
-            raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait a moment and try again.")
+        if not gemini_limiter.acquire(timeout=180, user_id=user_id):
+            raise HTTPException(
+                status_code=429, 
+                detail="Rate limit exceeded. Free tier allows 2 requests per minute. Please wait a moment and try again."
+            )
         
         start_time = time.time()
         
@@ -783,6 +788,24 @@ Based on the comparison, provide:
         except Exception as e:
             gemini_limiter.record_api_failure()
             
+            # Check if it's a quota/rate limit error
+            error_str = str(e).lower()
+            if 'quota' in error_str or 'resource_exhausted' in error_str or '429' in error_str:
+                print(f"Gemini API quota exceeded: {e}")
+                fallback_context = "AI service quota exceeded. Using fallback explanation. The free tier has daily limits - please try again later."
+            else:
+                print(f"Explanation error: {e}")
+                fallback_context = "AI service temporarily unavailable. Using fallback explanation."
+            
+            # Check if it's a quota/rate limit error
+            error_str = str(e).lower()
+            if 'quota' in error_str or 'resource_exhausted' in error_str or '429' in error_str:
+                print(f"Gemini API quota exceeded: {e}")
+                error_message = "AI service quota exceeded. Using fallback explanation. The free tier has daily limits - please try again later or upgrade your API key."
+            else:
+                print(f"Explanation error: {e}")
+                error_message = "AI service temporarily unavailable. Using fallback explanation."
+            
             # Return fallback explanation
             fallback_explanations = {
                 "grading": {
@@ -840,7 +863,7 @@ Based on the comparison, provide:
                 "confidence_level": "low",
                 "processing_time": time.time() - start_time,
                 "fallback_used": True,
-                "error_context": str(e) if str(e) else "AI service temporarily unavailable"
+                "error_context": fallback_context if 'fallback_context' in locals() else str(e)
             }
             
     except HTTPException:
@@ -1300,6 +1323,47 @@ async def get_user_rate_limiter_stats(user_id: str):
     return gemini_limiter.get_user_stats(user_id)
 
 
+@app.get("/historical-trends/{repo_id}/{branch_name}/status")
+async def get_historical_data_status(
+    repo_id: str,
+    branch_name: str
+):
+    """
+    Check how many historical data points exist for a branch.
+    """
+    try:
+        from app.services.historical_trends import HistoricalTrendsAnalyzer
+        analyzer = HistoricalTrendsAnalyzer()
+        
+        # Load historical data
+        historical_data = analyzer._load_historical_data(repo_id, branch_name)
+        
+        return {
+            "repo_id": repo_id,
+            "branch_name": branch_name,
+            "data_points_count": len(historical_data),
+            "has_sufficient_data": len(historical_data) >= 2,
+            "minimum_required": 2,
+            "data_points": [
+                {
+                    "timestamp": dp.timestamp.isoformat(),
+                    "commit_sha": dp.commit_sha[:8] if dp.commit_sha else "unknown",
+                    "overall_score": dp.overall_score
+                }
+                for dp in historical_data[-10:]  # Last 10 data points
+            ]
+        }
+    except Exception as e:
+        print(f"Historical data status error: {e}")
+        return {
+            "repo_id": repo_id,
+            "branch_name": branch_name,
+            "data_points_count": 0,
+            "has_sufficient_data": False,
+            "error": str(e)
+        }
+
+
 @app.get("/historical-trends/{repo_id}/{branch_name}")
 async def get_historical_trends(
     repo_id: str,
@@ -1322,14 +1386,20 @@ async def get_historical_trends(
         trend_analysis = analyzer.calculate_branch_trends(repo_id, branch_name, days_back)
         
         if not trend_analysis:
-            raise HTTPException(
-                status_code=404, 
-                detail="Insufficient historical data for trend analysis. At least 2 data points are required."
-            )
+            # Return empty structure instead of 404
+            return {
+                "repo_id": repo_id,
+                "branch_name": branch_name,
+                "has_data": False,
+                "message": "Insufficient historical data. Analyze this branch multiple times to see trends.",
+                "data_points_needed": 2,
+                "analysis": None
+            }
         
         return {
             "repo_id": repo_id,
             "branch_name": branch_name,
+            "has_data": True,
             "analysis": trend_analysis.to_dict()
         }
         
@@ -1363,16 +1433,21 @@ async def get_trend_visualizations(
         trend_analysis = analyzer.calculate_branch_trends(repo_id, branch_name, days_back)
         
         if not trend_analysis:
-            raise HTTPException(
-                status_code=404, 
-                detail="Insufficient historical data for visualization. At least 2 data points are required."
-            )
+            # Return empty structure instead of 404
+            return {
+                "repo_id": repo_id,
+                "branch_name": branch_name,
+                "has_data": False,
+                "message": "Insufficient historical data. Analyze this branch multiple times to see visualizations.",
+                "visualizations": []
+            }
         
         visualizations = analyzer.prepare_visualization_data(trend_analysis, chart_type)
         
         return {
             "repo_id": repo_id,
             "branch_name": branch_name,
+            "has_data": True,
             "visualizations": [viz.to_dict() for viz in visualizations]
         }
         
@@ -1406,13 +1481,17 @@ async def compare_branch_trends(
         comparison = analyzer.compare_branch_trends(repo_id, branch1, branch2, days_back)
         
         if not comparison:
-            raise HTTPException(
-                status_code=404, 
-                detail="Insufficient historical data for both branches. At least 2 data points per branch are required."
-            )
+            # Return empty structure instead of 404
+            return {
+                "repo_id": repo_id,
+                "has_data": False,
+                "message": "Insufficient historical data. Both branches need at least 2 analysis data points.",
+                "comparison": None
+            }
         
         return {
             "repo_id": repo_id,
+            "has_data": True,
             "comparison": comparison
         }
         
