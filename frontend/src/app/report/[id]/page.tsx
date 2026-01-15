@@ -418,7 +418,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                 {/* Top Navigation Bar */}
                 <ErrorBoundary level="section">
                     <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-background/80 backdrop-blur-xl">
-                        <div className="container flex h-16 items-center justify-between px-4">
+                        <div className="flex h-16 w-full items-center justify-between px-6">
                             <div className="flex items-center gap-2 font-bold text-xl tracking-tight">
                                 <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center">
                                     <Activity className="h-5 w-5 text-primary" />
@@ -461,16 +461,18 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                                 )}
                                 
                                 {/* Technology Tags */}
-                                <div className="flex items-center gap-2">
-                                    {data?.technologies.map((tech) => (
-                                        <span 
-                                            key={tech} 
-                                            className="px-3 py-1.5 text-xs rounded-lg bg-primary/10 text-primary border border-primary/20 font-medium uppercase tracking-wider"
-                                        >
-                                            {tech}
-                                        </span>
-                                    ))}
-                                </div>
+                                {data?.technologies && data.technologies.length > 0 && (
+                                    <div className="flex items-center gap-2">
+                                        {data.technologies.map((tech) => (
+                                            <span 
+                                                key={tech} 
+                                                className="px-3 py-1.5 text-xs rounded-lg bg-primary/10 text-primary border border-primary/20 font-medium uppercase tracking-wider"
+                                            >
+                                                {tech}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
                                 
                                 <Button size="sm" onClick={() => window.location.href = '/'}>New Scan</Button>
                             </div>
