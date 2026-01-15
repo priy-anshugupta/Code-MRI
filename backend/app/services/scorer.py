@@ -176,19 +176,29 @@ Be direct and technical. Focus on actionable insights."""
         chain = prompt | llm | StrOutputParser()
         
         # Wait for rate limit
-        if not gemini_limiter.acquire(timeout=120):
+        user_id = f"scoring_{repo_name or 'unknown'}"
+        if not gemini_limiter.acquire(timeout=120, user_id=user_id):
             return f"Rate limited. Score: {score_data.get('final_score', 0)}/100. Please wait and refresh for AI analysis."
         
-        analysis = chain.invoke({
-            "repo_name": repo_name or "Repository",
-            "technologies": ", ".join(technologies or ["Unknown"]),
-            "score_json": json.dumps(score_data, indent=2),
-        })
-        
-        return analysis.strip()
+        try:
+            analysis = chain.invoke({
+                "repo_name": repo_name or "Repository",
+                "technologies": ", ".join(technologies or ["Unknown"]),
+                "score_json": json.dumps(score_data, indent=2),
+            })
+            gemini_limiter.record_api_success()
+            return analysis.strip()
+        except Exception as e:
+            gemini_limiter.record_api_failure()
+            error_str = str(e)
+            # Check if it's a quota error
+            if "RESOURCE_EXHAUSTED" in error_str or "quota" in error_str.lower():
+                print(f"AI Scoring Agent - Quota Exceeded: Using fallback analysis")
+            else:
+                print(f"AI Scoring Agent Error: {e}")
+            raise
     except Exception as e:
-        print(f"AI Scoring Agent Error: {e}")
-        # Fallback to basic analysis
+        # Fallback to basic analysis when AI fails
         score = score_data.get('final_score', 0)
         if score >= 80:
             quality = "excellent"

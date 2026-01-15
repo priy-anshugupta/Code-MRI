@@ -531,8 +531,13 @@ Here is the structured analysis JSON:
         if not gemini_limiter.acquire(timeout=120):
             return base_summary  # Fall back if rate limited
         
-        summary = chain.invoke({"analysis_json": json.dumps(context, ensure_ascii=False)})
-        return summary.strip() or base_summary
+        try:
+            summary = chain.invoke({"analysis_json": json.dumps(context, ensure_ascii=False)})
+            gemini_limiter.record_api_success()
+            return summary.strip() or base_summary
+        except Exception as e:
+            gemini_limiter.record_api_failure()
+            raise
     except Exception:
         # Any failure should fall back to the deterministic summary to
         # keep the endpoint stable.
@@ -606,13 +611,18 @@ Respond ONLY with valid JSON, no markdown formatting or explanation."""
                 "error": "Rate limit exceeded. Please wait a moment and try again.",
             }
         
-        result = chain.invoke({
-            "file_path": relative_path,
-            "loc": metrics.get("loc", 0),
-            "comments": metrics.get("comments", 0),
-            "complexity": metrics.get("complexity", 0),
-            "content": content,
-        })
+        try:
+            result = chain.invoke({
+                "file_path": relative_path,
+                "loc": metrics.get("loc", 0),
+                "comments": metrics.get("comments", 0),
+                "complexity": metrics.get("complexity", 0),
+                "content": content,
+            })
+            gemini_limiter.record_api_success()
+        except Exception as e:
+            gemini_limiter.record_api_failure()
+            raise
 
         # Parse JSON response
         # Clean up potential markdown code blocks

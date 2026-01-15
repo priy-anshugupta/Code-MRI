@@ -3,12 +3,21 @@
 import { useCallback, useEffect, useState, useRef } from 'react'
 import { FileTree } from '@/components/FileTree'
 import { CodeViewModal } from '@/components/CodeViewModal'
-import { GitBranch, ShieldCheck, Cpu, AlertTriangle, Terminal, FileCode, Loader2, X, Eye, Activity, Layers, Box, CheckCircle2 } from 'lucide-react'
+import { BranchSelector } from '@/components/BranchSelector'
+import { BranchComparisonModal } from '@/components/BranchComparisonModal'
+import { ScoreBreakdown } from '@/components/ScoreBreakdown'
+import { AIExplanationModal } from '@/components/AIExplanationModal'
+import { HistoricalTrendsPanel } from '@/components/HistoricalTrendsPanel'
+import ErrorBoundary from '@/components/ErrorBoundary'
+import { ErrorFallback } from '@/components/ErrorFallback'
+import { useErrorHandler } from '@/hooks/useErrorHandler'
+import { GitBranch, ShieldCheck, Cpu, AlertTriangle, Terminal, FileCode, Loader2, X, Eye, Activity, Layers, Box, CheckCircle2, GitCompare, Brain, TrendingUp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { motion } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
+import { useAIExplanation } from '@/hooks/useAIExplanation'
 
 // Right Sidebar Component - AI Assistant Only
 const AIAssistant = ({ repoId }: { repoId: string }) => {
@@ -215,22 +224,48 @@ const IssueCard = ({ issue }: { issue: Issue }) => (
 export default function ReportPage({ params }: { params: { id: string } }) {
     const [data, setData] = useState<ReportData | null>(null)
     const [loading, setLoading] = useState(true)
-    const [error, setError] = useState('')
     const [selectedFile, setSelectedFile] = useState<string | null>(null)
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [fileAnalysis, setFileAnalysis] = useState<FileAnalysis | null>(null)
     const [analyzingFile, setAnalyzingFile] = useState(false)
     const [fileTreeWidth, setFileTreeWidth] = useState(288)
     const [assistantWidth, setAssistantWidth] = useState(360)
+    const [currentBranch, setCurrentBranch] = useState<string>('')
+    const [branches, setBranches] = useState<any[]>([])
+    const [isComparisonModalOpen, setIsComparisonModalOpen] = useState(false)
+    const [comparisonBranch, setComparisonBranch] = useState<string>('')
     const resizeRef = useRef({ dragging: null as null | 'left' | 'right', startX: 0, startLeftWidth: 288, startRightWidth: 360 })
+    
+    // AI Explanation integration
+    const aiExplanation = useAIExplanation(params.id)
+    
+    // Error handling
+    const errorHandler = useErrorHandler({
+        maxRetries: 2,
+        retryDelay: 2000
+    })
 
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const res = await api.get(`/report/${params.id}`)
+                const res = await errorHandler.execute(() => api.get(`/report/${params.id}`))
                 setData(res.data)
+                
+                // Fetch branches for the repository
+                try {
+                    const branchRes = await api.get(`/branches/${params.id}`)
+                    setBranches(branchRes.data.branches)
+                    
+                    // Set current branch to default branch if available
+                    const defaultBranch = branchRes.data.branches.find((b: any) => b.is_default)
+                    if (defaultBranch) {
+                        setCurrentBranch(defaultBranch.name)
+                    }
+                } catch (branchErr) {
+                    console.warn('Failed to fetch branches:', branchErr)
+                }
             } catch (err) {
-                setError('Failed to load report data.')
+                // Error handled by errorHandler
             } finally {
                 setLoading(false)
             }
@@ -264,6 +299,40 @@ export default function ReportPage({ params }: { params: { id: string } }) {
     const clearFileSelection = () => {
         setSelectedFile(null)
         setFileAnalysis(null)
+    }
+
+    const handleBranchChange = async (branchName: string, branchInfo: any) => {
+        setCurrentBranch(branchName)
+        setLoading(true)
+        errorHandler.clearError()
+        
+        try {
+            // Fetch updated report data for the new branch
+            const res = await errorHandler.execute(() => 
+                api.get(`/report/${params.id}`, {
+                    params: { branch: branchName }
+                })
+            )
+            setData(res.data)
+            
+            // Clear file selection when switching branches
+            clearFileSelection()
+        } catch (err: any) {
+            // Error handled by errorHandler
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const handleComparisonRequest = (targetBranch: string) => {
+        if (targetBranch !== currentBranch) {
+            setComparisonBranch(targetBranch)
+            setIsComparisonModalOpen(true)
+        }
+    }
+
+    const handleExplainComparison = (baseBranch: string, compareBranch: string) => {
+        aiExplanation.explainComparison(baseBranch, compareBranch)
     }
 
     const startResizeRight = useCallback((e: React.MouseEvent) => {
@@ -326,55 +395,107 @@ export default function ReportPage({ params }: { params: { id: string } }) {
         )
     }
 
-    if (error || !data) {
+    if (errorHandler.hasError || !data) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-background text-red-400">
-                <AlertTriangle className="mr-2" /> {error || 'No data found'}
+            <div className="min-h-screen flex items-center justify-center bg-background">
+                <ErrorFallback
+                    error={errorHandler.error ? new Error(errorHandler.getErrorMessage() || 'Unknown error') : new Error('No data found')}
+                    type={errorHandler.isNetworkError ? 'network' : 
+                          errorHandler.isAPIError ? 'api' : 'generic'}
+                    resetErrorBoundary={() => window.location.reload()}
+                    showRetry={true}
+                    showHome={true}
+                    title="Failed to Load Report"
+                    size="lg"
+                />
             </div>
         )
     }
 
     return (
-        <div className="min-h-screen bg-background text-foreground font-sans selection:bg-primary/30">
-            {/* Top Navigation Bar */}
-            <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-background/80 backdrop-blur-xl">
-                <div className="container flex h-16 items-center justify-between px-4">
-                    <div className="flex items-center gap-2 font-bold text-xl tracking-tight">
-                        <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center">
-                            <Activity className="h-5 w-5 text-primary" />
+        <ErrorBoundary level="page">
+            <div className="min-h-screen bg-background text-foreground font-sans selection:bg-primary/30">
+                {/* Top Navigation Bar */}
+                <ErrorBoundary level="section">
+                    <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-background/80 backdrop-blur-xl">
+                        <div className="container flex h-16 items-center justify-between px-4">
+                            <div className="flex items-center gap-2 font-bold text-xl tracking-tight">
+                                <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center">
+                                    <Activity className="h-5 w-5 text-primary" />
+                                </div>
+                                Code MRI <span className="text-muted-foreground font-normal text-sm ml-2">/ Report / {params.id.substring(0, 8)}</span>
+                            </div>
+                            
+                            <div className="flex items-center gap-4">
+                                {/* Branch Selector */}
+                                {branches.length > 0 && (
+                                    <ErrorBoundary level="component">
+                                        <div className="flex items-center gap-2">
+                                            <BranchSelector
+                                                repoId={params.id}
+                                                currentBranch={currentBranch}
+                                                branches={branches}
+                                                onBranchChange={handleBranchChange}
+                                            />
+                                            
+                                            {/* Branch Comparison Button */}
+                                            {branches.length > 1 && (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        // Find a different branch to compare with
+                                                        const otherBranch = branches.find(b => b.name !== currentBranch)
+                                                        if (otherBranch) {
+                                                            handleComparisonRequest(otherBranch.name)
+                                                        }
+                                                    }}
+                                                    className="gap-2"
+                                                >
+                                                    <GitCompare className="h-4 w-4" />
+                                                    Compare
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </ErrorBoundary>
+                                )}
+                                
+                                {/* Technology Tags */}
+                                <div className="flex items-center gap-2">
+                                    {data?.technologies.map((tech) => (
+                                        <span 
+                                            key={tech} 
+                                            className="px-3 py-1.5 text-xs rounded-lg bg-primary/10 text-primary border border-primary/20 font-medium uppercase tracking-wider"
+                                        >
+                                            {tech}
+                                        </span>
+                                    ))}
+                                </div>
+                                
+                                <Button size="sm" onClick={() => window.location.href = '/'}>New Scan</Button>
+                            </div>
                         </div>
-                        Code MRI <span className="text-muted-foreground font-normal text-sm ml-2">/ Report / {params.id.substring(0, 8)}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        {data.technologies.map((tech) => (
-                            <span 
-                                key={tech} 
-                                className="px-3 py-1.5 text-xs rounded-lg bg-primary/10 text-primary border border-primary/20 font-medium uppercase tracking-wider"
-                            >
-                                {tech}
-                            </span>
-                        ))}
-                        <Button size="sm" onClick={() => window.location.href = '/'}>New Scan</Button>
-                    </div>
-                </div>
-            </header>
+                    </header>
+                </ErrorBoundary>
 
             <div className="flex h-[calc(100vh-4rem)]">
                 {/* Left Sidebar - File Tree */}
-                <aside
-                    className="border-r border-white/10 bg-black/20 overflow-y-auto hidden lg:block custom-scrollbar"
-                    style={{ width: fileTreeWidth }}
-                >
-                    <div className="p-4 border-b border-white/10 bg-white/5">
-                        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Project Structure</h2>
-                        <p className="text-xs text-muted-foreground/60 mt-1">{data.metrics.total_files} files • {data.metrics.total_loc.toLocaleString()} LOC</p>
-                    </div>
-                    <FileTree 
-                        data={data.tree} 
-                        onFileSelect={handleFileSelect}
-                        selectedFile={selectedFile}
-                    />
-                </aside>
+                <ErrorBoundary level="section">
+                    <aside
+                        className="border-r border-white/10 bg-black/20 overflow-y-auto hidden lg:block custom-scrollbar"
+                        style={{ width: fileTreeWidth }}
+                    >
+                        <div className="p-4 border-b border-white/10 bg-white/5">
+                            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Project Structure</h2>
+                            <p className="text-xs text-muted-foreground/60 mt-1">{data.metrics.total_files} files • {data.metrics.total_loc.toLocaleString()} LOC</p>
+                        </div>
+                        <FileTree 
+                            data={data.tree} 
+                            onFileSelect={handleFileSelect}
+                            selectedFile={selectedFile}
+                        />
+                    </aside>
+                </ErrorBoundary>
 
                 {/* VS Code-style vertical splitter (File Tree) */}
                 <div
@@ -391,38 +512,167 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                 <main className="flex-1 overflow-y-auto custom-scrollbar">
                     <div className="p-6 lg:p-8 max-w-6xl mx-auto space-y-6">
                         
-                        {/* Overview Section */}
-                        <section className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                            {/* Grade & Score */}
-                            <div className="lg:col-span-1 glass-card rounded-xl p-6 flex flex-col items-center justify-center text-center space-y-4">
-                                <GradeCircle grade={data.metrics.grade} />
-                                <div>
-                                    <div className="text-sm text-muted-foreground uppercase tracking-wider font-medium">Health Score</div>
-                                    <div className="text-2xl font-bold text-foreground">{data.scoring?.final_score.toFixed(0) || 0}/100</div>
+                        {/* Branch Context Indicator */}
+                        {currentBranch && (
+                            <div className="glass-card rounded-xl p-4 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <GitBranch className="h-5 w-5 text-primary" />
+                                    <div>
+                                        <div className="text-sm font-medium">Current Branch</div>
+                                        <div className="font-mono text-lg text-primary">{currentBranch}</div>
+                                    </div>
                                 </div>
+                                {branches.length > 1 && (
+                                    <div className="text-xs text-muted-foreground">
+                                        {branches.length - 1} other branch{branches.length > 2 ? 'es' : ''} available
+                                    </div>
+                                )}
                             </div>
+                        )}
+                        
+                        {/* Overview Section */}
+                        <ErrorBoundary level="section">
+                            <section className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                                {/* Grade & Score */}
+                                <div className="lg:col-span-1 glass-card rounded-xl p-6 flex flex-col items-center justify-center text-center space-y-4">
+                                    <GradeCircle grade={data.metrics.grade} />
+                                    <div>
+                                        <div className="text-sm text-muted-foreground uppercase tracking-wider font-medium">Health Score</div>
+                                        <div className="text-2xl font-bold text-foreground">{data.scoring?.final_score.toFixed(0) || 0}/100</div>
+                                    </div>
+                                </div>
 
-                            {/* Key Metrics */}
-                            <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <StatCard label="Total Files" value={data.metrics.total_files} icon={FileCode} />
-                                <StatCard label="Lines of Code" value={data.metrics.total_loc.toLocaleString()} icon={Terminal} />
-                                <StatCard label="Issues Found" value={data.issues.length} icon={AlertTriangle} trend={data.issues.length > 0 ? "Requires Attention" : "Clean"} />
-                                <StatCard label="Complexity" value={data.metrics.complexity.toFixed(1)} icon={Cpu} />
-                                <StatCard label="Maintainability" value={data.metrics.maintainability.toFixed(1)} icon={Layers} />
-                                <StatCard label="Documentation" value={`${data.metrics.docs_coverage.toFixed(0)}%`} icon={Box} />
-                            </div>
-                        </section>
+                                {/* Key Metrics */}
+                                <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <StatCard label="Total Files" value={data.metrics.total_files} icon={FileCode} />
+                                    <StatCard label="Lines of Code" value={data.metrics.total_loc.toLocaleString()} icon={Terminal} />
+                                    <StatCard label="Issues Found" value={data.issues.length} icon={AlertTriangle} trend={data.issues.length > 0 ? "Requires Attention" : "Clean"} />
+                                    <StatCard label="Complexity" value={data.metrics.complexity.toFixed(1)} icon={Cpu} />
+                                    <StatCard label="Maintainability" value={data.metrics.maintainability.toFixed(1)} icon={Layers} />
+                                    <StatCard label="Documentation" value={`${data.metrics.docs_coverage.toFixed(0)}%`} icon={Box} />
+                                </div>
+                            </section>
+                        </ErrorBoundary>
 
                         {/* AI Summary */}
                         <div className="glass-card rounded-xl p-6">
-                            <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                                <ShieldCheck className="w-5 h-5 text-primary" />
-                                AI Executive Summary
-                            </h3>
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="text-lg font-semibold flex items-center gap-2">
+                                    <ShieldCheck className="w-5 h-5 text-primary" />
+                                    AI Executive Summary
+                                </h3>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => aiExplanation.explainGrading('overall', data.scoring)}
+                                    disabled={aiExplanation.loading}
+                                    className="gap-2"
+                                >
+                                    {aiExplanation.loading ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <Brain className="h-4 w-4" />
+                                    )}
+                                    {aiExplanation.loading ? 'Thinking...' : 'Explain'}
+                                </Button>
+                            </div>
                             <div className="text-muted-foreground leading-relaxed">
                                 <MarkdownRenderer content={String(data.summary)} />
                             </div>
                         </div>
+
+                        {/* Enhanced Score Breakdown */}
+                        {data.scoring && (
+                            <ErrorBoundary level="section">
+                                <div className="glass-card rounded-xl p-6">
+                                    <div className="flex items-center justify-between mb-6">
+                                        <h3 className="text-lg font-semibold flex items-center gap-2">
+                                            <TrendingUp className="w-5 h-5 text-primary" />
+                                            Detailed Score Analysis
+                                        </h3>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => aiExplanation.explainGrading('detailed', data.scoring)}
+                                            disabled={aiExplanation.loading}
+                                            className="gap-2"
+                                        >
+                                            {aiExplanation.loading ? (
+                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                            ) : (
+                                                <Brain className="h-4 w-4" />
+                                            )}
+                                            {aiExplanation.loading ? 'Analyzing...' : 'Explain Scores'}
+                                        </Button>
+                                    </div>
+                                    
+                                    {/* Convert existing scoring data to enhanced format */}
+                                    <ScoreBreakdown
+                                        scoreData={{
+                                            overall_grade: data.metrics.grade,
+                                            overall_score: data.scoring.final_score,
+                                            category_scores: {
+                                                readability: {
+                                                    name: 'Readability',
+                                                    score: data.scoring.category_scores.readability,
+                                                    weight: 0.25,
+                                                    contributing_factors: ['Code structure', 'Naming conventions', 'Comment quality'],
+                                                    improvement_potential: Math.max(0, 90 - data.scoring.category_scores.readability)
+                                                },
+                                                complexity: {
+                                                    name: 'Complexity',
+                                                    score: data.scoring.category_scores.complexity,
+                                                    weight: 0.20,
+                                                    contributing_factors: ['Cyclomatic complexity', 'Nesting depth', 'Function size'],
+                                                    improvement_potential: Math.max(0, 85 - data.scoring.category_scores.complexity)
+                                                },
+                                                maintainability: {
+                                                    name: 'Maintainability',
+                                                    score: data.metrics.maintainability,
+                                                    weight: 0.20,
+                                                    contributing_factors: ['Modularity', 'Coupling', 'Cohesion'],
+                                                    improvement_potential: Math.max(0, 85 - data.metrics.maintainability)
+                                                },
+                                                documentation: {
+                                                    name: 'Documentation',
+                                                    score: data.scoring.category_scores.docs_coverage,
+                                                    weight: 0.15,
+                                                    contributing_factors: ['README quality', 'Inline documentation', 'API docs'],
+                                                    improvement_potential: Math.max(0, 90 - data.scoring.category_scores.docs_coverage)
+                                                },
+                                                security: {
+                                                    name: 'Security',
+                                                    score: data.scoring.category_scores.security,
+                                                    weight: 0.10,
+                                                    contributing_factors: ['Vulnerability detection', 'Secret scanning', 'Dependency analysis'],
+                                                    improvement_potential: Math.max(0, 95 - data.scoring.category_scores.security)
+                                                },
+                                                performance: {
+                                                    name: 'Performance',
+                                                    score: 75, // Default since not in current data
+                                                    weight: 0.10,
+                                                    contributing_factors: ['Code efficiency', 'Resource usage patterns'],
+                                                    improvement_potential: 15
+                                                }
+                                            },
+                                            recommendations: [
+                                                {
+                                                    category: 'readability',
+                                                    priority: 'MEDIUM' as const,
+                                                    title: 'Improve code documentation',
+                                                    description: 'Add more descriptive comments and documentation to enhance code readability.',
+                                                    estimated_impact: 5.2,
+                                                    effort_level: 'EASY' as const,
+                                                    specific_files: []
+                                                }
+                                            ]
+                                        }}
+                                        onExplainScore={(category) => aiExplanation.explainGrading(category, data.scoring)}
+                                        showTrends={false}
+                                    />
+                                </div>
+                            </ErrorBoundary>
+                        )}
 
                         {/* Context Inspector */}
                         <div className="glass-card rounded-xl p-6">
@@ -473,6 +723,20 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                                         >
                                             <Eye className="h-4 w-4" />
                                             View Code
+                                        </Button>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => aiExplanation.explainCode(fileAnalysis.file)}
+                                            disabled={aiExplanation.loading}
+                                            className="gap-2 flex-shrink-0"
+                                        >
+                                            {aiExplanation.loading ? (
+                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                            ) : (
+                                                <Brain className="h-4 w-4" />
+                                            )}
+                                            {aiExplanation.loading ? 'Analyzing...' : 'Explain'}
                                         </Button>
                                         {fileAnalysis.truncated && (
                                             <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded border border-yellow-500/30">Truncated</span>
@@ -569,6 +833,17 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                                 )}
                             </div>
                         </div>
+
+                        {/* Historical Trends */}
+                        {branches.length > 0 && (
+                            <ErrorBoundary level="section">
+                                <HistoricalTrendsPanel
+                                    repoId={params.id}
+                                    currentBranch={currentBranch}
+                                    branches={branches}
+                                />
+                            </ErrorBoundary>
+                        )}
                     </div>
                 </main>
 
@@ -583,23 +858,48 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                     <div className="mx-auto h-full w-px bg-white/10 group-hover:bg-primary/30" />
                 </div>
 
-                <aside
-                    className="hidden xl:flex flex-col bg-black/20 border-l border-white/10"
-                    style={{ width: assistantWidth }}
-                >
-                    <AIAssistant repoId={params.id} />
-                </aside>
+                <ErrorBoundary level="section">
+                    <aside
+                        className="hidden xl:flex flex-col bg-black/20 border-l border-white/10"
+                        style={{ width: assistantWidth }}
+                    >
+                        <AIAssistant repoId={params.id} />
+                    </aside>
+                </ErrorBoundary>
             </div>
             
-            {/* Code View Modal */}
-            <CodeViewModal
-                isOpen={isModalOpen}
-                onClose={() => setIsModalOpen(false)}
-                repoId={params.id}
-                filePath={selectedFile || ''}
-                fileAnalysis={fileAnalysis}
-            />
-        </div>
+            {/* Modals */}
+            <ErrorBoundary level="component">
+                {/* Code View Modal */}
+                <CodeViewModal
+                    isOpen={isModalOpen}
+                    onClose={() => setIsModalOpen(false)}
+                    repoId={params.id}
+                    filePath={selectedFile || ''}
+                    fileAnalysis={fileAnalysis}
+                />
+                
+                {/* Branch Comparison Modal */}
+                <BranchComparisonModal
+                    isOpen={isComparisonModalOpen}
+                    onClose={() => setIsComparisonModalOpen(false)}
+                    repoId={params.id}
+                    baseBranch={currentBranch}
+                    compareBranch={comparisonBranch}
+                    onExplainComparison={handleExplainComparison}
+                />
+                
+                {/* AI Explanation Modal */}
+                <AIExplanationModal
+                    isOpen={aiExplanation.isModalOpen}
+                    onClose={aiExplanation.closeModal}
+                    repoId={params.id}
+                    explanationType={aiExplanation.explanationType || 'grading'}
+                    context={aiExplanation.context}
+                />
+            </ErrorBoundary>
+            </div>
+        </ErrorBoundary>
     )
 }
 
