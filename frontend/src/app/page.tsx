@@ -44,10 +44,10 @@ export default function Home() {
 
     return (
         <main className="flex min-h-screen flex-col items-center justify-center p-6 relative overflow-hidden bg-background selection:bg-primary/30">
-            {/* Dynamic Background */}
+            {/* Background Image */}
             <div className="absolute inset-0 z-0">
-                <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-background to-background" />
-                <div className="absolute bottom-0 left-0 right-0 h-[500px] bg-gradient-to-t from-background to-transparent" />
+                <div className="absolute inset-0 bg-[url('/background.png')] bg-cover bg-center bg-no-repeat" />
+                <div className="absolute inset-0 bg-background/60" />
                 
                 {/* Animated Grid */}
                 <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
